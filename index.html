@@ -254,6 +254,7 @@
         <li><b>Move it</b>: left, right, up, down, center, corner, or "top left", "bottom right"</li>
         <li><b>Build</b>: "add cube", "add sphere", ring, pyramid, cylinder, cone; then next, remove, clear</li>
         <li><b>Colour</b>: say red, blue, green, purple, pink, orange, yellow, teal, white, grey or cyan; "paint red" recolours a whole design</li>
+        <li><b>Style</b>: say "solid" for realistic lit 3D, or "wireframe" for glowing lines</li>
         <li><b>Design</b>: city, tower, bridge, arena, house, robot, alien, character; "again" for a new version</li>
         <li><b>Say "Orbit"</b> then anything: ask the AI, or ask it to change the hologram</li>
       </ul>
@@ -264,6 +265,7 @@
         <button id="start" type="button">Start camera</button>
         <button id="voice" class="ghost" type="button" aria-pressed="false">Assistant: off</button>
         <button id="sound" class="ghost" type="button" aria-pressed="true">Sound: on</button>
+        <button id="style" class="ghost" type="button" aria-pressed="true">Style: solid</button>
       </div>
       <div class="seg" role="group" aria-label="Shape">
         <button type="button" id="shape-globe" data-shape="globe" aria-pressed="true">Globe</button>
@@ -356,6 +358,7 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function () {
   'use strict';
@@ -435,6 +438,7 @@
     for (var i = 0; i < 8; i++) s.push([o[i], n[i], 0]);
     return s;
   }
+  var solidDirty = true; // the solid 3D scene is rebuilt whenever the model changes
   var SHAPES = { globe: buildGlobe(), ring: buildRing(), cube: buildCube(), build: [] };
 
   /* ---------- model builder: several simple parts combined into one model ---------- */
@@ -489,7 +493,7 @@
     var n = parseInt(m[1], 16); return (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
   }
   function cleanColor(c) { c = String(c || '').toLowerCase().trim(); if (c === 'gray') c = 'grey'; return COLORS[c] || /^#[0-9a-f]{6}$/.test(c) ? c : 'cyan'; }
-  var primCache = {}, parts = [], sel = 0, selShown = false, PART_STORE = 'orbit_model', MAX_PARTS = 60;
+  var primCache = {}, parts = [], sel = 0, selShown = false, PART_STORE = 'orbit_model', MAX_PARTS = 100;
   var revealN = 0, nextReveal = 0, lastKind = 'city'; // parts appear one by one after a design is generated
   function clampN(v, lo, hi, d) { v = (v === null || v === undefined || v === '') ? NaN : +v; return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; }
   function cleanParts(list) { // accept only well-formed parts, whoever supplied them
@@ -529,6 +533,7 @@
     });
     if (!parts.length) { var e = document.createElement('li'); e.className = 'label'; e.textContent = 'No parts yet. Add one or generate a design.'; ol.appendChild(e); }
     if (parts[sel]) document.getElementById('partSize').value = Math.round(parts[sel].size * 100);
+    solidDirty = true;
     try { localStorage.setItem(PART_STORE, JSON.stringify(parts)); } catch (err) {}
   }
   var SPOTS = [[0,0,0],[1.1,0,0],[-1.1,0,0],[0,1.1,0],[0,-1.1,0],[1.1,1.1,0],[-1.1,1.1,0],[1.1,-1.1,0],[-1.1,-1.1,0],[0,0,1.1],[0,0,-1.1]];
@@ -664,7 +669,7 @@
   };
   function setHolo(name) { // colour of the hologram, dial, hand skeleton and interface accents
     if (!COLORS[name]) return false;
-    holoName = name; HOLO = COLORS[name];
+    holoName = name; HOLO = COLORS[name]; solidDirty = true;
     GRAB = /^(orange|yellow|red|pink)$/.test(name) ? '255, 255, 255' : '255, 179, 71'; // keep the holding colour distinct
     var st = document.documentElement.style;
     st.setProperty('--holo', 'rgb(' + HOLO + ')'); st.setProperty('--grab', 'rgb(' + GRAB + ')'); st.setProperty('--line', 'rgba(' + HOLO + ', 0.24)');
@@ -916,6 +921,7 @@
   }
   function setShape(name) {
     if (name !== shape) SFX.shape();
+    solidDirty = true;
     shape = name; document.body.dataset.shape = name;
     document.querySelectorAll('.seg button').forEach(function (o) { o.setAttribute('aria-pressed', String(o.dataset.shape === name)); });
   }
@@ -974,6 +980,7 @@
     var n = col.length, idx = new Uint32Array(n); for (var j = 0; j < n; j++) idx[j] = j;
     model = { n: n, pos: new Float32Array(pos), col: col, cell: cell, idx: idx,
               sx: new Float32Array(n), sy: new Float32Array(n), sz: new Float32Array(n), sf: new Float32Array(n) };
+    solidDirty = true;
   }
   async function aiDepth() { // on-device depth model: downloads once, then the browser keeps it
     if (!tfLib) { tfLib = await import(TF_URL); tfLib.env.allowLocalModels = false; }
@@ -1142,6 +1149,7 @@
     dome: 'gen:dome', stadium: 'gen:dome', arena: 'gen:dome', house: 'gen:house', villa: 'gen:house', infrastructure: 'gen:infra',
     robot: 'gen:robot', android: 'gen:robot', alien: 'gen:alien', character: 'gen:character', figure: 'gen:figure', hero: 'gen:figure',
     again: 'gen:again', regenerate: 'gen:again', random: 'gen:again',
+    solid: 'style:solid', realistic: 'style:solid', wireframe: 'style:wire', lines: 'style:wire',
     closer: 'closer', close: 'closer', nearer: 'closer', near: 'closer', forward: 'closer',
     further: 'further', farther: 'further', far: 'further', away: 'further', back: 'further', backward: 'further',
     hello: 'hello', hi: 'hello', hey: 'hello', help: 'help', commands: 'help',
@@ -1178,6 +1186,7 @@
       (spinning ? 'Rotating. ' : 'Holding still. ') + (!camOn ? 'Camera is off.' : hands.length ? hands.length + (hands.length === 1 ? ' hand' : ' hands') + ' tracked.' : 'No hand in view.');
     else if (c === 'quiet') { say2 = 'Voice muted. Say speak to bring me back.'; speak(say2, true); muted = true; refreshAssist(); return; }
     else if (c === 'unquiet') { muted = false; say2 = 'Voice restored.'; }
+    else if (c.indexOf('style:') === 0) { var gotSolid = setStyle(c === 'style:solid'); say2 = gotSolid ? 'Solid surfaces on.' : 'Wireframe view.'; }
     else if (c.indexOf('color:') === 0) { setHolo(c.slice(6)); say2 = 'Colour set to ' + c.slice(6) + '.'; }
     else if (c.indexOf('paint:') === 0) { paintAll(c.slice(6)); setShape('build'); say2 = 'Design painted ' + c.slice(6) + '.'; }
     else if (c.indexOf('gen:') === 0) {
@@ -1204,7 +1213,7 @@
   var AI_URL = 'https://api.anthropic.com/v1/messages', AI_MODEL = 'claude-haiku-5-5', KEY_STORE = 'orbit_ai_key';
   var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further', 'left', 'right', 'up', 'down', 'center', 'build',
                  'gen:city', 'gen:tower', 'gen:bridge', 'gen:dome', 'gen:house', 'gen:robot', 'gen:alien', 'gen:figure']
-                .concat(Object.keys(COLORS).map(function (n) { return 'color:' + n; }));
+                .concat(Object.keys(COLORS).map(function (n) { return 'color:' + n; }), ['style:solid', 'style:wire']);
   var aiKey = '', chat = [];
   try { aiKey = localStorage.getItem(KEY_STORE) || ''; } catch (err) {}
   function keyUI() {
@@ -1235,6 +1244,7 @@
       '"actions" is a list of zero or more of: ' + ACTIONS.join(', ') + '. ' +
       'stop and spin control rotation; closer and further move the hologram toward or away from the screen; bigger and smaller change size by about 30 percent each; faster and slower change spin speed; ' +
       'globe, ring, cube and image switch the shape (image is a 3D model made from the user\'s photo); deeper and flatter change the image model depth; reset restores the start view. ' +
+      'style:solid shows models as solid lit 3D shapes and style:wire as glowing wireframes; ' +
       'color:NAME (for example color:red) changes the hologram and interface colour, with NAME one of ' + Object.keys(COLORS).join(', ') + '; ' +
       'left, right, up, down and center move it around the screen; build shows the user\'s own multi-part model. ' +
       'Repeat an action to apply it more than once. Only use actions when the user asks for a change to the hologram. ' +
@@ -1242,7 +1252,7 @@
       'Each part is {"shape": one of sphere, cube, ring, pyramid, cylinder, cone, "x": .., "y": .., "z": .., "w": .., "h": .., "d": .., "rx": .., "ry": .., "rz": .., "color": ..}. ' +
       'x, y, z is the centre of the part: x is right, y is up, z is toward the viewer. w, h, d are its full width, height and depth, so a cube with w 0.4, h 2, d 0.4 is a tall block. ' +
       'rx, ry, rz are optional rotations in degrees. Unrotated, a cylinder and a cone stand upright, a pyramid has a square base, and a ring lies flat. ' +
-      'color is one of ' + Object.keys(COLORS).join(', ') + ', or "#rrggbb". Keep everything between -2 and 2 with the ground near y = -1.2. Parts are drawn as glowing coloured wireframes. ' +
+      'color is one of ' + Object.keys(COLORS).join(', ') + ', or "#rrggbb". Keep everything between -2 and 2 with the ground near y = -1.2. Parts are drawn as solid, lit 3D shapes with shadows, each in its own colour, so overlap and stack them to sculpt realistic forms: bodies, limbs, windows, roofs, wheels and small details. ' +
       'Use plenty of parts, varied colours and sensible proportions, and make parts touch where they should join. Characters must be your own original designs, never existing characters. ' +
       'The actions gen:city, gen:tower, gen:bridge, gen:dome, gen:house, gen:robot, gen:alien and gen:figure run quick built-in generators instead; use one of those only when the user asks for exactly that with no details, and never together with "build". ' +
       'The current model has ' + parts.length + ' parts' + (parts.length <= 20 ? ': ' + JSON.stringify(parts) : '') + '. ' +
@@ -1274,7 +1284,7 @@
       var res = await fetch(AI_URL, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: AI_MODEL, max_tokens: 4000, system: systemPrompt(), messages: chat })
+        body: JSON.stringify({ model: AI_MODEL, max_tokens: 7000, system: systemPrompt(), messages: chat })
       });
       var data = null; try { data = await res.json(); } catch (err) {}
       if (!res.ok) throw { status: res.status, msg: data && data.error && data.error.message };
@@ -1468,6 +1478,140 @@
     }
   }
 
+  /* ---------- solid 3D: real surfaces with lighting and shadows, drawn by three.js and copied into the scene ---------- */
+  var solidOn = true, gl = null, glFailed = false;
+  function initSolid() {
+    if (gl) return true; if (glFailed || !window.THREE) return false;
+    try {
+      var T = window.THREE, cv = document.createElement('canvas');
+      var renderer = new T.WebGLRenderer({ canvas: cv, alpha: true, antialias: true });
+      renderer.setClearColor(0x000000, 0); renderer.outputEncoding = T.sRGBEncoding;
+      renderer.toneMapping = T.NoToneMapping;
+      renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+      var scene = new T.Scene(), camera = new T.PerspectiveCamera(40, 1, 0.05, 80);
+      scene.add(new T.HemisphereLight(0xdcecff, 0x1b2434, 0.55));
+      var key = new T.DirectionalLight(0xffffff, 0.95); key.position.set(3.5, 5.5, 4.5); key.castShadow = true; // main light, from upper right in front
+      key.shadow.mapSize.set(1024, 1024); key.shadow.bias = -0.0012; key.shadow.normalBias = 0.02;
+      var sc = key.shadow.camera; sc.left = -2.6; sc.right = 2.6; sc.top = 2.6; sc.bottom = -2.6; sc.near = 0.5; sc.far = 24;
+      scene.add(key);
+      var rim = new T.DirectionalLight(0x6fd6ff, 0.5); rim.position.set(-4, 2, -3.5); scene.add(rim);   // coloured light from behind
+      var fill = new T.DirectionalLight(0xffe2c4, 0.22); fill.position.set(-3, 0.5, 4); scene.add(fill);
+      var group = new T.Group(); group.matrixAutoUpdate = false; scene.add(group);
+      gl = { T: T, cv: cv, renderer: renderer, scene: scene, camera: camera, group: group, rim: rim, w: 0, h: 0, meshes: [], geo: {} };
+      return true;
+    } catch (err) { glFailed = true; return false; }
+  }
+  function partGeometry(kind) { // each shape as a unit-size solid, cached
+    var T = gl.T, g = gl.geo[kind]; if (g) return g;
+    if (kind === 'sphere') g = new T.SphereGeometry(0.5, 40, 24);
+    else if (kind === 'cube') g = new T.BoxGeometry(1, 1, 1);
+    else if (kind === 'cylinder') g = new T.CylinderGeometry(0.5, 0.5, 1, 40);
+    else if (kind === 'cone') g = new T.ConeGeometry(0.5, 1, 40);
+    else if (kind === 'pyramid') { g = new T.ConeGeometry(0.7071, 1, 4); g.rotateY(Math.PI / 4); }
+    else { g = new T.TorusGeometry(0.3673, 0.1327, 20, 56); g.rotateX(Math.PI / 2); g.scale(1, 1 / 0.2654, 1); } // ring, lying flat
+    return (gl.geo[kind] = g);
+  }
+  function tint(rgb) { // the palette is tuned for glowing lines; solids need it richer and a little darker
+    var c = new gl.T.Color('rgb(' + rgb.replace(/ /g, '') + ')'), h = {}; c.getHSL(h);
+    return c.setHSL(h.h, Math.min(1, h.s * 1.15 + (h.s > 0.2 ? 0.1 : 0)), h.l * 0.82);
+  }
+  function clearGroup() {
+    var g = gl.group;
+    while (g.children.length) {
+      var c = g.children[0]; g.remove(c);
+      c.traverse(function (o) { if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } if (o.geometry && o.userData.own) o.geometry.dispose(); });
+    }
+    gl.meshes = [];
+  }
+  function imageMesh() { // the photo as a real textured surface, pushed in and out by the depth map
+    var T = gl.T, amt = +el('depthAmt').value / 100, flip = el('flip').checked;
+    var res = Math.min(230, Math.round(+el('detail').value * 2.2)), sw = srcCanvas.width, sh = srcCanvas.height, k = res / Math.max(sw, sh);
+    var gw = Math.max(2, Math.round(sw * k)), gh = Math.max(2, Math.round(sh * k));
+    var c = newCanvas(gw, gh).getContext('2d'); c.drawImage(srcCanvas, 0, 0, gw, gh);
+    var d = newCanvas(gw, gh).getContext('2d'); d.drawImage(depthCanvas, 0, 0, gw, gh);
+    var px = c.getImageData(0, 0, gw, gh).data, dp = d.getImageData(0, 0, gw, gh).data, cell = 2.3 / Math.max(gw, gh);
+    var pos = new Float32Array(gw * gh * 3), uv = new Float32Array(gw * gh * 2), idx = [], x, y, i;
+    for (y = 0; y < gh; y++) for (x = 0; x < gw; x++) {
+      i = y * gw + x; var dv = dp[i * 4] / 255; if (flip) dv = 1 - dv;
+      pos[i*3] = (x - (gw - 1) / 2) * cell; pos[i*3+1] = ((gh - 1) / 2 - y) * cell; pos[i*3+2] = (dv - 0.5) * amt * 1.8;
+      uv[i*2] = x / (gw - 1); uv[i*2+1] = 1 - y / (gh - 1);
+    }
+    for (y = 0; y < gh - 1; y++) for (x = 0; x < gw - 1; x++) {
+      var a = y * gw + x, b = a + 1, e = a + gw, f = e + 1;
+      if (px[a*4+3] < 40 || px[b*4+3] < 40 || px[e*4+3] < 40 || px[f*4+3] < 40) continue; // leave see-through areas open
+      idx.push(a, e, b, b, e, f);
+    }
+    var g = new T.BufferGeometry();
+    g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.setAttribute('uv', new T.BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+    var tex = new T.CanvasTexture(srcCanvas); tex.encoding = T.sRGBEncoding;
+    var m = new T.Mesh(g, new T.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+    m.userData.own = true; m.castShadow = m.receiveShadow = true; return m;
+  }
+  function rebuildSolid() {
+    var T = gl.T, holo = tint(HOLO), accent = tint(GRAB), m;
+    function mat(color, o) { return new T.MeshStandardMaterial(Object.assign({ color: color, roughness: 0.42, metalness: 0.2 }, o || {})); }
+    function add(mesh, own) { mesh.castShadow = mesh.receiveShadow = true; mesh.userData.own = !!own; gl.group.add(mesh); return mesh; }
+    clearGroup(); solidDirty = false;
+    if (shape === 'globe') {
+      add(new T.Mesh(new T.SphereGeometry(1, 64, 40), mat(holo, { roughness: 0.35, metalness: 0.35 })), true);
+      m = add(new T.Mesh(new T.TorusGeometry(1.32, 0.03, 12, 96), mat(accent, { emissive: accent, emissiveIntensity: 0.5 })), true); m.rotation.x = Math.PI / 2 - 0.45;
+      add(new T.Mesh(new T.CylinderGeometry(0.03, 0.03, 2.5, 16), mat(holo)), true);
+    } else if (shape === 'ring') {
+      m = add(new T.Mesh(new T.TorusGeometry(0.9, 0.34, 40, 120), mat(holo, { roughness: 0.25, metalness: 0.6 })), true); m.rotation.x = Math.PI / 2;
+    } else if (shape === 'cube') {
+      add(new T.Mesh(new T.BoxGeometry(1.7, 1.7, 1.7), mat(holo, { transparent: true, opacity: 0.45, roughness: 0.15, metalness: 0.1 })), true).castShadow = false;
+      add(new T.Mesh(new T.BoxGeometry(0.8, 0.8, 0.8), mat(accent, { emissive: accent, emissiveIntensity: 0.35 })), true);
+    } else if (shape === 'image') {
+      gl.group.add(imageMesh());
+    } else { // a built design: one solid per part, inside a holder that applies the fit-to-screen scale
+      var holder = new T.Group(), D = Math.PI / 180, lowest = 1e9;
+      holder.scale.setScalar(fit.k); holder.position.set(-fit.c[0] * fit.k, -fit.c[1] * fit.k, -fit.c[2] * fit.k);
+      parts.forEach(function (q, i) {
+        var mesh = new T.Mesh(partGeometry(q.shape), mat(tint(colorRGB(q.color))));
+        mesh.position.set(q.x, q.y, q.z); mesh.rotation.set(q.rx * D, q.ry * D, q.rz * D, 'YXZ'); mesh.scale.set(q.w * q.size, q.h * q.size, q.d * q.size);
+        mesh.castShadow = mesh.receiveShadow = true; holder.add(mesh); gl.meshes[i] = mesh;
+      });
+      gl.group.add(holder);
+      SHAPES.build.forEach(function (sg) { lowest = Math.min(lowest, sg[0][1], sg[1][1]); });
+      if (parts.length) { // dark glass platform so the design has something to stand on and cast shadows onto
+        m = new T.Mesh(new T.CylinderGeometry(1.5, 1.5, 0.04, 64), mat(0x0d1c2e, { roughness: 0.3, metalness: 0.5, transparent: true, opacity: 0.8 }));
+        m.position.y = lowest - 0.03; m.receiveShadow = true; m.userData.own = true; gl.group.add(m);
+      }
+    }
+  }
+  function drawSolid() { // returns false when solid drawing is not possible, so the wireframe is used instead
+    if (!initSolid()) return false;
+    try {
+      var T = gl.T, pr = Math.min(DPR, 2);
+      if (gl.w !== W || gl.h !== H || gl.pr !== pr) { gl.renderer.setPixelRatio(pr); gl.renderer.setSize(W, H, false); gl.w = W; gl.h = H; gl.pr = pr; }
+      if (solidDirty) rebuildSolid();
+      // same view as the wireframe: focal length HOME_DIST * S pixels, camera `dist` units in front
+      var S = Math.min(W, H) * 0.27 * zoom, cam = gl.camera;
+      cam.fov = 2 * Math.atan(H / (2 * HOME_DIST * S)) * 180 / Math.PI; cam.aspect = W / H; cam.position.set(0, 0, dist);
+      cam.setViewOffset(W, H, -pan.x * W, -pan.y * H, W, H); cam.updateProjectionMatrix();
+      gl.group.matrix.set(R[0], R[1], R[2], 0, R[3], R[4], R[5], 0, R[6], R[7], R[8], 0, 0, 0, 0, 1); gl.group.matrixWorldNeedsUpdate = true;
+      gl.rim.color.copy(tint(HOLO));
+      if (shape === 'build') {
+        var assembling = revealN < parts.length;
+        for (var i = 0; i < gl.meshes.length; i++) {
+          var mesh = gl.meshes[i]; if (!mesh) continue;
+          mesh.visible = i < revealN;
+          var glow = assembling && i === revealN - 1 ? 1 : (!assembling && selShown && i === sel ? 0.45 : 0); // flash on arrival, soft glow when selected
+          if (mesh.userData.glow !== glow) { mesh.userData.glow = glow; mesh.material.emissive.copy(glow === 1 ? new T.Color(0xffffff) : mesh.material.color); mesh.material.emissiveIntensity = glow; }
+        }
+      }
+      gl.renderer.render(gl.scene, cam);
+      ctx.drawImage(gl.cv, 0, 0, W, H);
+      return true;
+    } catch (err) { glFailed = true; gl = null; return false; }
+  }
+  function setStyle(wantSolid) {
+    solidOn = !!wantSolid;
+    if (solidOn && !initSolid()) { solidOn = false; say('Solid 3D could not start in this browser, so the wireframe style is being used.'); }
+    el('style').setAttribute('aria-pressed', String(solidOn)); el('style').textContent = solidOn ? 'Style: solid' : 'Style: wireframe';
+    return solidOn;
+  }
+
   function drawModel() {
     var m = model, n = m.n, pos = m.pos, cx = midX(), cy = midY(), S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
     for (var i = 0, q = 0; i < n; i++, q += 3) {
@@ -1544,7 +1688,7 @@
     }
     if (thinking && now - lastScan > 520) { lastScan = now; SFX.scan(); }
     drawBackdrop(now); drawProjector(now); drawDial(held);
-    if (shape === 'image') drawModel(); else drawObject(held);
+    if (solidOn && drawSolid()) { /* drawn as solid, lit 3D */ } else if (shape === 'image') drawModel(); else drawObject(held);
     if (camOn) drawHands();
 
     if (camOn && tracker) {
@@ -1570,7 +1714,7 @@
   var STATE_STORE = 'orbit_state', savedText = '', lastSaveCheck = 0;
   function snapshot() {
     return JSON.stringify({ shape: shape, zoom: +zoom.toFixed(3), dist: +distTarget.toFixed(3), pan: [+pan.x.toFixed(3), +pan.y.toFixed(3)],
-      R: R.map(function (v) { return +v.toFixed(4); }), spinning: spinning, rate: rate, color: holoName, sound: soundOn,
+      R: R.map(function (v) { return +v.toFixed(4); }), spinning: spinning, rate: rate, color: holoName, sound: soundOn, solid: solidOn,
       depth: el('depthAmt').value, detail: el('detail').value, flip: el('flip').checked, kind: lastKind });
   }
   function saveProgress(now) {
@@ -1588,6 +1732,7 @@
     if (Array.isArray(o.R) && o.R.length === 9 && o.R.every(function (v) { return isFinite(+v); })) { var m = tidy(o.R.map(Number)); if (m.every(isFinite)) R = m; }
     if (typeof o.spinning === 'boolean' && !reduceMotion) spinning = o.spinning;
     if (isFinite(+o.rate)) rate = Math.max(0.2, Math.min(8, +o.rate));
+    if (o.solid === false) solidOn = false;
     if (o.sound === false) { soundOn = false; el('sound').setAttribute('aria-pressed', 'false'); el('sound').textContent = 'Sound: off'; }
     if (isFinite(+o.depth)) el('depthAmt').value = o.depth;
     if (isFinite(+o.detail)) el('detail').value = o.detail;
@@ -1597,9 +1742,11 @@
       document.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.shape === shape)); }); }
     savedText = snapshot();
   })();
+  el('style').addEventListener('click', function () { setStyle(!solidOn); });
+  setStyle(solidOn);
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, color: function () { return holoName; }, panNow: function () { return [pan.x, pan.y, panVel.x, panVel.y]; }, generate: generate, reveal: function () { return revealN; }, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, solid: function () { return { on: solidOn, ready: !!gl, failed: glFailed, meshes: gl ? gl.meshes.length : 0 }; }, color: function () { return holoName; }, panNow: function () { return [pan.x, pan.y, panVel.x, panVel.y]; }, generate: generate, reveal: function () { return revealN; }, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
