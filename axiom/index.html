@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Axiom Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Layout idea: a command deck. Status bar on top, a living core beside the conversation, input dock at the bottom.
+     One committed dark theme: graphite with an amber reactor accent and violet for the user's side. */
+  :root {
+    color-scheme: dark;
+    --bg: #07080c;
+    --panel: #10121a;
+    --panel-2: #171a25;
+    --line: rgba(255, 178, 62, 0.22);
+    --core: #ffb23e;        /* the assistant: amber */
+    --user: #9a86ff;        /* the user: violet */
+    --text: #e9e6df;
+    --muted: #8e8a83;
+    --danger: #ff6b5e;
+    --font-display: "Rajdhani", "Avenir Next Condensed", "Trebuchet MS", sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+    display: flex; flex-direction: column; overflow: hidden;
+    background-image: linear-gradient(rgba(255, 178, 62, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 178, 62, 0.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--core); outline-offset: 2px; }
+
+  /* ---- status bar ---- */
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); background: rgba(10, 11, 16, 0.9); }
+  .brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+  h1 { font-family: var(--font-display); font-weight: 700; font-size: 24px; letter-spacing: 0.22em; margin: 0; color: var(--core); text-shadow: 0 0 18px rgba(255, 178, 62, 0.45); }
+  #state { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  #state[data-s="thinking"], #state[data-s="speaking"], #state[data-s="listening"] { color: var(--core); }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btn, select {
+    font-family: var(--font-display); font-weight: 600; font-size: 14px; letter-spacing: 0.05em;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 7px 12px;
+  }
+  select { padding-right: 8px; }
+  .btn[aria-pressed="true"] { border-color: var(--core); color: var(--core); box-shadow: inset 0 -2px 0 var(--core); }
+  .btn.warn { border-color: var(--danger); color: var(--danger); }
+
+  /* ---- main deck ---- */
+  main { flex: 1 1 auto; min-height: 0; display: flex; }
+  .coreWrap { flex: 0 0 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; border-right: 1px solid var(--line); }
+  #core { width: 240px; height: 240px; display: block; }
+  .coreLabel { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.18em; font-size: 13px; color: var(--muted); text-transform: uppercase; }
+  .stats { font-family: var(--font-mono); font-size: 12px; color: var(--muted); display: grid; grid-template-columns: auto auto; gap: 2px 14px; font-variant-numeric: tabular-nums; }
+  .stats dd { margin: 0; text-align: right; color: var(--text); }
+  .stats dt { margin: 0; }
+
+  #feed { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 18px 16px 8px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+  .msg { max-width: min(760px, 100%); padding: 11px 14px; border-radius: 3px; position: relative; overflow-wrap: anywhere; }
+  .msg.ai { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--core); }
+  .msg.me { align-self: flex-end; background: var(--panel-2); border: 1px solid rgba(154, 134, 255, 0.35); border-right: 3px solid var(--user); }
+  .who { font-family: var(--font-display); font-weight: 700; font-size: 12px; letter-spacing: 0.16em; margin-bottom: 3px; display: flex; gap: 10px; align-items: center; }
+  .msg.ai .who { color: var(--core); } .msg.me .who { color: var(--user); }
+  .copy { margin-left: auto; background: none; border: 0; color: var(--muted); font-family: var(--font-mono); font-size: 11px; padding: 2px 4px; }
+  .body > :first-child { margin-top: 0; } .body > :last-child { margin-bottom: 0; }
+  .body p { margin: 0.5em 0; } .body ul, .body ol { margin: 0.5em 0; padding-left: 1.4em; }
+  .body h4 { font-family: var(--font-display); font-size: 17px; letter-spacing: 0.04em; margin: 0.8em 0 0.3em; color: var(--core); }
+  .body code { font-family: var(--font-mono); font-size: 0.9em; background: rgba(255, 255, 255, 0.07); padding: 1px 5px; border-radius: 3px; }
+  .body pre { background: #05060a; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; padding: 10px 12px; overflow-x: auto; margin: 0.6em 0; }
+  .body pre code { background: none; padding: 0; font-size: 13px; }
+  .body a { color: var(--core); }
+  .msg img.thumb { display: block; max-width: 220px; max-height: 160px; border-radius: 3px; margin-top: 6px; border: 1px solid rgba(255, 255, 255, 0.15); }
+  .caret::after { content: "▍"; color: var(--core); animation: blink 0.9s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: none; border: 1px dashed var(--line); border-radius: 3px; padding: 6px 10px; font-size: 13px; color: var(--muted); }
+  .chip:hover { color: var(--core); border-color: var(--core); }
+  .err { align-self: stretch; max-width: none; border: 1px solid var(--danger); color: var(--text); background: rgba(255, 107, 94, 0.08); padding: 9px 12px; border-radius: 3px; font-size: 14px; }
+
+  /* ---- input dock ---- */
+  .dock { border-top: 1px solid var(--line); background: rgba(10, 11, 16, 0.94); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .attach { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+  .attach[hidden] { display: none; }
+  .attach img { height: 44px; border-radius: 3px; border: 1px solid var(--line); }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  #text { flex: 1 1 auto; min-width: 0; resize: none; max-height: 160px; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; line-height: 1.4; }
+  .icon { flex: none; min-width: 44px; padding: 0 8px; height: 44px; display: grid; place-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; font-family: var(--font-display); font-weight: 700; font-size: 13px; letter-spacing: 0.04em; }
+  .icon[aria-pressed="true"] { border-color: var(--core); color: var(--core); background: rgba(255, 178, 62, 0.12); }
+  #send { padding: 0 18px; border-color: var(--core); color: var(--core); background: rgba(255, 178, 62, 0.12); font-size: 15px; }
+  #send.stop { border-color: var(--danger); color: var(--danger); background: rgba(255, 107, 94, 0.1); }
+  .vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .hintline { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  /* ---- dialogs ---- */
+  .modal { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(2, 3, 6, 0.75); z-index: 10; }
+  .modal[hidden] { display: none; }
+  .box { width: 100%; max-width: 480px; background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--core); border-radius: 3px; padding: 16px; display: grid; gap: 10px; }
+  .box h2 { font-family: var(--font-display); font-size: 18px; letter-spacing: 0.12em; margin: 0; color: var(--core); text-transform: uppercase; }
+  .box p { margin: 0; color: var(--muted); font-size: 13.5px; }
+  .box input, .box textarea { width: 100%; background: #07080c; border: 1px solid var(--line); border-radius: 3px; padding: 9px 11px; }
+  .box textarea { min-height: 150px; resize: vertical; }
+  .box .tools { justify-content: flex-start; }
+
+  @media (max-width: 760px) {
+    main { flex-direction: column; }
+    .coreWrap { flex: none; flex-direction: row; justify-content: flex-start; padding: 8px 16px; border-right: 0; border-bottom: 1px solid var(--line); gap: 14px; }
+    #core { width: 72px; height: 72px; }
+    .stats { display: none; }
+    h1 { font-size: 20px; }
+    .btn, select { font-size: 13px; padding: 6px 9px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .caret::after { animation: none; } #feed { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><h1>AXIOM</h1><span id="state" data-s="idle" role="status">standing by</span></div>
+  <div class="tools">
+    <label class="vh" for="mode">Personality</label>
+    <select id="mode" title="Personality">
+      <option value="direct">Direct</option>
+      <option value="tutor">Tutor</option>
+      <option value="creative">Creative</option>
+      <option value="coder">Coder</option>
+    </select>
+    <label class="vh" for="model">AI model</label>
+    <select id="model" title="AI model">
+      <option value="claude-haiku-5-5">Fast</option>
+      <option value="claude-sonnet-5-5">Balanced</option>
+      <option value="claude-opus-5-5">Deep</option>
+    </select>
+    <button class="btn" type="button" id="speakBtn" aria-pressed="true">Voice: on</button>
+    <button class="btn" type="button" id="soundBtn" aria-pressed="true">Sound: on</button>
+    <button class="btn" type="button" id="memoryBtn">Memory</button>
+    <button class="btn" type="button" id="keyBtn">AI key</button>
+    <button class="btn" type="button" id="newBtn">New chat</button>
+  </div>
+</header>
+
+<main>
+  <aside class="coreWrap" aria-label="Assistant status">
+    <canvas id="core" width="480" height="480" aria-hidden="true"></canvas>
+    <div class="coreLabel" id="coreLabel">Standing by</div>
+    <dl class="stats">
+      <dt>Messages</dt><dd id="sMsgs">0</dd>
+      <dt>Last reply</dt><dd id="sTime">n/a</dd>
+      <dt>Speed</dt><dd id="sRate">n/a</dd>
+    </dl>
+  </aside>
+  <section id="feed" aria-live="polite" aria-label="Conversation"></section>
+</main>
+
+<div class="dock">
+  <div class="attach" id="attach" hidden><img id="attachImg" alt="Attached image"><span>Image attached to your next message</span><button class="btn" type="button" id="attachRemove">Remove</button></div>
+  <form class="row" id="form">
+    <input class="vh" type="file" id="file" accept="image/*">
+    <label class="icon" for="file" title="Attach an image" id="fileLabel">IMG</label>
+    <button class="icon" type="button" id="mic" aria-pressed="false" title="Speak your message">MIC</button>
+    <button class="icon" type="button" id="hands" aria-pressed="false" title="Hands-free: keep listening after each reply">AUTO</button>
+    <textarea id="text" rows="1" placeholder="Ask anything" aria-label="Message"></textarea>
+    <button class="icon" type="submit" id="send">Send</button>
+  </form>
+  <div class="hintline" id="hint">Enter sends. Shift + Enter adds a line. Type /remember followed by a fact to save it to memory.</div>
+</div>
+
+<div class="modal" id="keyModal" hidden>
+  <div class="box" role="dialog" aria-labelledby="keyTitle">
+    <h2 id="keyTitle">AI key</h2>
+    <p>Paste your Claude API key. It starts with sk-ant-. It is saved only in this browser on this device and is sent only to Anthropic when you send a message. Never put it in the code or on GitHub.</p>
+    <input type="password" id="keyInput" autocomplete="off" placeholder="sk-ant-…" aria-label="Claude API key">
+    <div class="tools">
+      <button class="btn" type="button" id="keySave">Save key</button>
+      <button class="btn warn" type="button" id="keyRemove">Remove key</button>
+      <button class="btn" type="button" id="keyClose">Close</button>
+    </div>
+    <p id="keyState" role="status">No key saved.</p>
+  </div>
+</div>
+
+<div class="modal" id="memModal" hidden>
+  <div class="box" role="dialog" aria-labelledby="memTitle">
+    <h2 id="memTitle">Memory</h2>
+    <p>Facts Axiom should always know about you, one per line. They are saved on this device and included with every message.</p>
+    <textarea id="memText" aria-label="Memory notes" placeholder="My name is…&#10;I am studying…&#10;Explain things with examples."></textarea>
+    <div class="tools">
+      <button class="btn" type="button" id="memSave">Save memory</button>
+      <button class="btn" type="button" id="memClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var API = 'https://api.anthropic.com/v1/messages';
+  var KEY_STORE = 'orbit_ai_key';          // shared with the hologram project on the same site, so one key serves both
+  var CHAT_STORE = 'axiom_chat', PREF_STORE = 'axiom_prefs', MEM_STORE = 'axiom_memory';
+  var $ = function (id) { return document.getElementById(id); };
+  var feed = $('feed'), text = $('text');
+  function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  var apiKey = ''; try { apiKey = localStorage.getItem(KEY_STORE) || ''; } catch (e) {}
+  var prefs = Object.assign({ mode: 'direct', model: 'claude-haiku-5-5', speak: true, sound: true }, load(PREF_STORE, {}));
+  var memory = String(load(MEM_STORE, '') || '');
+  var chat = load(CHAT_STORE, []); if (!Array.isArray(chat)) chat = [];   // [{role, text, img?}] ; img is kept only for this session
+  chat = chat.filter(function (m) { return m && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string'; });
+  var state = 'idle', busy = false, aborter = null, pendingImg = null;
+
+  /* ---------- personalities ---------- */
+  var MODES = {
+    direct: 'Style: direct. Lead with the answer. Be blunt, candid and concise. No filler, no flattery, no hedging, no unrequested disclaimers and no lectures. ' +
+            'Give your real assessment, including when the user\'s idea is weak, and say what you would do instead. Say plainly when you do not know something.',
+    tutor: 'Style: tutor. Teach step by step in plain language with a concrete example, then check understanding with one short question. Correct mistakes kindly and precisely.',
+    creative: 'Style: creative partner. Offer vivid, original ideas and unexpected angles, give several distinct options when brainstorming, and commit to a favourite.',
+    coder: 'Style: coding partner. Answer with working code first, then a short explanation of the key decisions. Point out bugs and edge cases directly.'
+  };
+  function systemPrompt() {
+    return 'You are Axiom, a personal AI assistant running inside the user\'s own web app. ' + MODES[prefs.mode] + ' ' +
+      'Use light markdown (short paragraphs, lists, code blocks) only when it helps. Replies may be read aloud, so keep them tight unless the user asks for depth. ' +
+      'Local time for the user: ' + new Date().toString() + '.' +
+      (memory.trim() ? ' Things the user asked you to remember about them:\n' + memory.trim() : '');
+  }
+
+  /* ---------- sounds ---------- */
+  var actx = null;
+  function wake() { var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; try { if (!actx) actx = new AC(); if (actx.state === 'suspended') actx.resume(); } catch (e) {} }
+  document.addEventListener('pointerdown', wake, true); document.addEventListener('keydown', wake, true);
+  function blip(f0, f1, dur, type, vol, delay) {
+    if (!prefs.sound || !actx || actx.state !== 'running') return;
+    try {
+      var t = actx.currentTime + (delay || 0), o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.03);
+    } catch (e) {}
+  }
+  var SFX = {
+    send: function () { blip(520, 880, 0.09, 'triangle', 0.06); },
+    start: function () { blip(300, 300, 0.05, 'sine', 0.05); blip(450, 450, 0.05, 'sine', 0.05, 0.07); },
+    done: function () { blip(660, 660, 0.07, 'sine', 0.05); blip(990, 990, 0.12, 'sine', 0.05, 0.08); },
+    tick: function () { blip(1500, 1200, 0.035, 'square', 0.02); },
+    mic: function () { blip(700, 1100, 0.08, 'sine', 0.05); },
+    error: function () { blip(170, 120, 0.25, 'square', 0.04); }
+  };
+  document.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('button, select, label.icon')) SFX.tick(); });
+
+  /* ---------- state + core animation ---------- */
+  var LABELS = { idle: 'Standing by', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', error: 'Fault' };
+  function setState(s) {
+    state = s; $('state').dataset.s = s; $('state').textContent = LABELS[s].toLowerCase(); $('coreLabel').textContent = LABELS[s];
+  }
+  var cv = $('core'), cx = cv.getContext('2d'), reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches, level = 0.2;
+  function drawCore(now) {
+    var w = cv.width, c = w / 2, t = reduce ? 0 : now / 1000;
+    var target = state === 'speaking' ? 0.55 + 0.45 * Math.abs(Math.sin(t * 9) * Math.sin(t * 2.3)) : state === 'thinking' ? 0.6 : state === 'listening' ? 0.45 + 0.15 * Math.sin(t * 4) : 0.2;
+    level += (target - level) * 0.15;
+    var col = state === 'error' ? '255,107,94' : state === 'listening' ? '154,134,255' : '255,178,62';
+    cx.clearRect(0, 0, w, w);
+    var g = cx.createRadialGradient(c, c, 4, c, c, w * 0.28 * (0.8 + level * 0.5));
+    g.addColorStop(0, 'rgba(' + col + ',' + (0.55 + level * 0.4) + ')'); g.addColorStop(1, 'rgba(' + col + ',0)');
+    cx.fillStyle = g; cx.beginPath(); cx.arc(c, c, w * 0.42, 0, 6.2832); cx.fill();
+    cx.lineCap = 'round';
+    for (var r = 0; r < 3; r++) { // three arc rings turning at different speeds
+      var rad = w * (0.26 + r * 0.075), speed = (state === 'thinking' ? 2.4 : 0.5) * (r % 2 ? -1 : 1), a0 = t * speed + r * 1.7;
+      cx.lineWidth = r === 0 ? 5 : 3; cx.strokeStyle = 'rgba(' + col + ',' + (0.85 - r * 0.22) + ')';
+      for (var k = 0; k < 3; k++) { cx.beginPath(); cx.arc(c, c, rad, a0 + k * 2.094, a0 + k * 2.094 + 1.2 + level * 0.5); cx.stroke(); }
+    }
+    cx.lineWidth = 3; cx.strokeStyle = 'rgba(' + col + ',0.9)'; cx.beginPath(); // voice bars around the centre
+    for (var i = 0; i < 40; i++) {
+      var ang = i / 40 * 6.2832, amp = w * 0.02 + w * 0.07 * level * (0.4 + 0.6 * Math.abs(Math.sin(t * 6 + i * 1.3)));
+      cx.moveTo(c + Math.cos(ang) * w * 0.14, c + Math.sin(ang) * w * 0.14); cx.lineTo(c + Math.cos(ang) * (w * 0.14 + amp), c + Math.sin(ang) * (w * 0.14 + amp));
+    }
+    cx.stroke();
+    requestAnimationFrame(drawCore);
+  }
+  requestAnimationFrame(drawCore);
+
+  /* ---------- safe markdown ---------- */
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function inline(s) {
+    return esc(s)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  }
+  function markdown(src) {
+    var out = [], lines = src.split('\n'), i = 0, para = [], list = null;
+    function flushPara() { if (para.length) { out.push('<p>' + inline(para.join(' ')) + '</p>'); para = []; } }
+    function flushList() { if (list) { out.push('<' + list.tag + '>' + list.items.map(function (x) { return '<li>' + inline(x) + '</li>'; }).join('') + '</' + list.tag + '>'); list = null; } }
+    while (i < lines.length) {
+      var ln = lines[i], m;
+      if (/^```/.test(ln)) {
+        flushPara(); flushList(); var code = []; i++;
+        while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]);
+        i++; out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>'); continue;
+      }
+      if ((m = /^#{1,6}\s+(.*)/.exec(ln))) { flushPara(); flushList(); out.push('<h4>' + inline(m[1]) + '</h4>'); }
+      else if ((m = /^\s*[-*•]\s+(.*)/.exec(ln))) { flushPara(); if (!list || list.tag !== 'ul') { flushList(); list = { tag: 'ul', items: [] }; } list.items.push(m[1]); }
+      else if ((m = /^\s*\d+[.)]\s+(.*)/.exec(ln))) { flushPara(); if (!list || list.tag !== 'ol') { flushList(); list = { tag: 'ol', items: [] }; } list.items.push(m[1]); }
+      else if (!ln.trim()) { flushPara(); flushList(); }
+      else { flushList(); para.push(ln); }
+      i++;
+    }
+    flushPara(); flushList(); return out.join('');
+  }
+
+  /* ---------- conversation view ---------- */
+  function addMsg(role, body, img) {
+    var el = document.createElement('div'); el.className = 'msg ' + (role === 'user' ? 'me' : 'ai');
+    var who = document.createElement('div'); who.className = 'who'; who.textContent = role === 'user' ? 'YOU' : 'AXIOM';
+    var copy = document.createElement('button'); copy.type = 'button'; copy.className = 'copy'; copy.textContent = 'copy';
+    var b = document.createElement('div'); b.className = 'body';
+    copy.addEventListener('click', function () {
+      try { navigator.clipboard.writeText(el.dataset.raw || '').then(function () { copy.textContent = 'copied'; setTimeout(function () { copy.textContent = 'copy'; }, 1200); }, function () { copy.textContent = 'copy failed'; }); } catch (e) { copy.textContent = 'copy failed'; }
+    });
+    who.appendChild(copy); el.appendChild(who); el.appendChild(b);
+    if (img) { var im = document.createElement('img'); im.className = 'thumb'; im.alt = 'Image you attached'; im.src = img; el.appendChild(im); }
+    feed.appendChild(el); setBody(el, body); scrollDown(); return el;
+  }
+  function setBody(el, body) { el.dataset.raw = body; el.querySelector('.body').innerHTML = el.classList.contains('me') ? '<p>' + esc(body).replace(/\n/g, '<br>') + '</p>' : markdown(body); }
+  function addError(msg) { var e = document.createElement('div'); e.className = 'err'; e.textContent = msg; feed.appendChild(e); scrollDown(); }
+  function scrollDown() { feed.scrollTop = feed.scrollHeight; }
+  var STARTERS = ['Give me a blunt review of an idea I have', 'Explain something hard in simple steps', 'Quiz me on a topic I am studying', 'Help me plan my week'];
+  function renderAll() {
+    feed.textContent = '';
+    addMsg('assistant', chat.length ? 'Welcome back. Your last conversation is below.' : 'Axiom online. Ask me anything, attach an image with **IMG**, or tap **MIC** and talk.' + (apiKey ? '' : ' First, tap **AI key** and paste your key so I can answer.'));
+    if (!chat.length) {
+      var chips = document.createElement('div'); chips.className = 'chips';
+      STARTERS.forEach(function (s) { var c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = s; c.addEventListener('click', function () { text.value = s; text.focus(); grow(); }); chips.appendChild(c); });
+      feed.appendChild(chips);
+    }
+    chat.forEach(function (m) { addMsg(m.role, m.text, m.img); });
+    $('sMsgs').textContent = String(chat.length);
+  }
+  function persist() { save(CHAT_STORE, chat.slice(-60).map(function (m) { return { role: m.role, text: m.text }; })); $('sMsgs').textContent = String(chat.length); }
+
+  /* ---------- speaking ---------- */
+  var synth = window.speechSynthesis || null, speakBuf = '', inCode = false, speaking = 0;
+  function voice() {
+    var vs = synth ? synth.getVoices() : [], want = ['en-GB', 'en-US', 'en'];
+    for (var w = 0; w < want.length; w++) for (var i = 0; i < vs.length; i++) if ((vs[i].lang || '').replace('_', '-').indexOf(want[w]) === 0) return vs[i];
+    return null;
+  }
+  function sayNow(s) {
+    s = s.replace(/[*_#`>]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
+    if (!s || !prefs.speak || !synth) return;
+    try {
+      var u = new SpeechSynthesisUtterance(s), v = voice(); if (v) { u.voice = v; u.lang = v.lang; }
+      u.rate = 1.06; u.pitch = 0.9; speaking++;
+      u.onstart = function () { if (state !== 'thinking') setState('speaking'); };
+      u.onend = u.onerror = function () { speaking = Math.max(0, speaking - 1); if (!speaking && !busy) { setState('idle'); if (handsFree) setTimeout(startMic, 350); } };
+      synth.speak(u);
+    } catch (e) {}
+  }
+  function feedSpeech(chunk, end) { // speak whole sentences as they arrive; skip code blocks
+    var parts = chunk.split('```');
+    for (var p = 0; p < parts.length; p++) { if (p > 0) inCode = !inCode; if (!inCode) speakBuf += parts[p]; else if (p > 0 && !/code is on screen/.test(speakBuf)) speakBuf += ' The code is on screen. '; }
+    var m;
+    while ((m = /^([\s\S]*?[.!?:])(\s+|$)/.exec(speakBuf)) && (m[2] || end)) { sayNow(m[1]); speakBuf = speakBuf.slice(m[0].length); }
+    if (end) { sayNow(speakBuf); speakBuf = ''; inCode = false; }
+  }
+  function hush() { try { if (synth) synth.cancel(); } catch (e) {} speaking = 0; speakBuf = ''; inCode = false; }
+
+  /* ---------- sending ---------- */
+  function apiMessages() {
+    var list = chat.slice(-30); while (list.length && list[0].role !== 'user') list.shift();
+    return list.map(function (m) {
+      if (m.role === 'user' && m.img) return { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: m.img.split(',')[1] } }, { type: 'text', text: m.text || 'What is in this image?' }] };
+      return { role: m.role, content: m.text };
+    });
+  }
+  async function send(raw) {
+    var q = (raw || '').trim();
+    if (busy) return;
+    if (/^\/remember\s+/i.test(q)) {
+      memory = (memory.trim() ? memory.trim() + '\n' : '') + q.replace(/^\/remember\s+/i, ''); save(MEM_STORE, memory);
+      addMsg('user', q); addMsg('assistant', 'Saved to memory.'); return;
+    }
+    if (!q && !pendingImg) return;
+    if (!apiKey) { openKey(); addError('Add your AI key first, then send your message again.'); return; }
+    hush(); stopMic();
+    var mine = { role: 'user', text: q || 'What is in this image?', img: pendingImg }; chat.push(mine); addMsg('user', mine.text, mine.img); clearAttach(); persist();
+    var el = addMsg('assistant', ''), body = el.querySelector('.body'); body.classList.add('caret');
+    busy = true; setState('thinking'); SFX.send(); $('send').textContent = 'Stop'; $('send').classList.add('stop');
+    var full = '', t0 = performance.now(), first = 0, dirty = false, err = null;
+    function paint() { dirty = false; if (!busy) return; setBody(el, full); body.classList.add('caret'); scrollDown(); }
+    aborter = new AbortController();
+    try {
+      var res = await fetch(API, { method: 'POST', signal: aborter.signal,
+        headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: prefs.model, max_tokens: 3000, stream: true, system: systemPrompt(), messages: apiMessages() }) });
+      if (!res.ok) { var j = null; try { j = await res.json(); } catch (e) {} throw { status: res.status, msg: j && j.error && j.error.message }; }
+      var reader = res.body.getReader(), dec = new TextDecoder(), buf = '';
+      for (;;) {
+        var step = await reader.read(); if (step.done) break;
+        buf += dec.decode(step.value, { stream: true });
+        var nl; while ((nl = buf.indexOf('\n')) !== -1) {
+          var line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (line.indexOf('data:') !== 0) continue;
+          var ev = null; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
+          if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+            if (!first) { first = performance.now(); SFX.start(); }
+            full += ev.delta.text; feedSpeech(ev.delta.text, false);
+            if (!dirty) { dirty = true; requestAnimationFrame(paint); }
+          } else if (ev.type === 'error') throw { status: 500, msg: ev.error && ev.error.message };
+        }
+      }
+    } catch (e) { err = e; }
+    busy = false; aborter = null; body.classList.remove('caret'); $('send').textContent = 'Send'; $('send').classList.remove('stop');
+    var stopped = err && err.name === 'AbortError';
+    if (full) {
+      setBody(el, full + (stopped ? '\n\n*(stopped)*' : '')); chat.push({ role: 'assistant', text: full }); persist(); feedSpeech('', true);
+      var secs = (performance.now() - t0) / 1000; $('sTime').textContent = secs.toFixed(1) + ' s'; $('sRate').textContent = Math.round(full.length / Math.max(0.2, (performance.now() - (first || t0)) / 1000)) + ' ch/s';
+    } else { el.remove(); if (err && !stopped) { chat.pop(); persist(); } }
+    if (err && !stopped) {
+      SFX.error(); setState('error'); setTimeout(function () { if (!busy && !speaking) setState('idle'); }, 1500);
+      addError(err.status === 401 ? 'The AI key was rejected. Tap AI key, check it and save it again.'
+        : err.status === 429 ? 'The AI service says the limit is reached or the credit has run out. ' + (err.msg || '')
+        : err.status ? 'The AI service returned an error: ' + (err.msg || err.status)
+        : 'I could not reach the AI service. Check the internet connection and try again.');
+    } else { if (full) SFX.done(); if (!speaking) { setState('idle'); if (handsFree && !stopped) setTimeout(startMic, 350); } }
+    scrollDown();
+  }
+  $('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (busy) { if (aborter) aborter.abort(); hush(); return; }
+    var v = text.value; text.value = ''; grow(); send(v);
+  });
+  function grow() { text.style.height = 'auto'; text.style.height = Math.min(160, text.scrollHeight) + 'px'; }
+  text.addEventListener('input', grow);
+  text.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit ? $('form').requestSubmit() : $('send').click(); } });
+
+  /* ---------- image attach ---------- */
+  function clearAttach() { pendingImg = null; $('attach').hidden = true; $('file').value = ''; }
+  $('attachRemove').addEventListener('click', clearAttach);
+  $('file').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0]; if (!f) return;
+    var url = URL.createObjectURL(f), img = new Image();
+    img.onload = function () {
+      var k = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+      pendingImg = c.toDataURL('image/jpeg', 0.85); $('attachImg').src = pendingImg; $('attach').hidden = false; URL.revokeObjectURL(url); text.focus();
+    };
+    img.onerror = function () { addError('That file could not be opened as an image. Try a JPEG or PNG.'); URL.revokeObjectURL(url); };
+    img.src = url;
+  });
+
+  /* ---------- microphone ---------- */
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition, rec = null, micOn = false, handsFree = false, heard = '';
+  function startMic() {
+    if (micOn || busy || speaking) return;
+    if (!SR) { addError('Voice input is not available in this browser. On iPad and iPhone it needs Safari with Dictation turned on in Settings.'); handsFree = false; $('hands').setAttribute('aria-pressed', 'false'); return; }
+    try {
+      rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false; heard = '';
+      rec.onstart = function () { micOn = true; $('mic').setAttribute('aria-pressed', 'true'); setState('listening'); SFX.mic(); };
+      rec.onresult = function (e) { var s = ''; for (var i = 0; i < e.results.length; i++) s += e.results[i][0].transcript; heard = s; text.value = s; grow(); };
+      rec.onerror = function (e) {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { handsFree = false; $('hands').setAttribute('aria-pressed', 'false'); addError('The microphone is blocked for this page. Allow it in the browser settings, then tap MIC again.'); }
+      };
+      rec.onend = function () {
+        micOn = false; $('mic').setAttribute('aria-pressed', 'false'); if (state === 'listening') setState('idle');
+        var said = heard.trim(); heard = '';
+        if (said) { text.value = ''; grow(); send(said); } else if (handsFree && !busy && !speaking) setTimeout(startMic, 600);
+      };
+      rec.start();
+    } catch (e) { micOn = false; }
+  }
+  function stopMic() { if (rec && micOn) { heard = ''; try { rec.abort(); } catch (e) {} } }
+  $('mic').addEventListener('click', function () { if (micOn) { try { rec.stop(); } catch (e) {} } else { hush(); startMic(); } });
+  $('hands').addEventListener('click', function () {
+    handsFree = !handsFree; $('hands').setAttribute('aria-pressed', String(handsFree));
+    if (handsFree) { hush(); startMic(); } else stopMic();
+  });
+
+  /* ---------- settings ---------- */
+  function syncPrefs() {
+    $('mode').value = prefs.mode; $('model').value = prefs.model;
+    $('speakBtn').setAttribute('aria-pressed', String(prefs.speak)); $('speakBtn').textContent = prefs.speak ? 'Voice: on' : 'Voice: off';
+    $('soundBtn').setAttribute('aria-pressed', String(prefs.sound)); $('soundBtn').textContent = prefs.sound ? 'Sound: on' : 'Sound: off';
+    $('keyBtn').textContent = apiKey ? 'AI key set' : 'AI key'; $('keyBtn').classList.toggle('warn', !apiKey);
+    save(PREF_STORE, prefs);
+  }
+  if (!MODES[prefs.mode]) prefs.mode = 'direct';
+  $('mode').addEventListener('change', function () { prefs.mode = $('mode').value; syncPrefs(); });
+  $('model').addEventListener('change', function () { prefs.model = $('model').value; syncPrefs(); });
+  $('speakBtn').addEventListener('click', function () { prefs.speak = !prefs.speak; if (!prefs.speak) hush(); syncPrefs(); });
+  $('soundBtn').addEventListener('click', function () { prefs.sound = !prefs.sound; syncPrefs(); });
+  $('newBtn').addEventListener('click', function () { if (busy && aborter) aborter.abort(); hush(); chat = []; persist(); renderAll(); });
+  function openKey() { $('keyModal').hidden = false; $('keyInput').value = ''; $('keyState').textContent = apiKey ? 'A key is saved on this device, ending in ' + apiKey.slice(-4) + '.' : 'No key saved.'; }
+  $('keyBtn').addEventListener('click', openKey);
+  $('keyClose').addEventListener('click', function () { $('keyModal').hidden = true; });
+  $('keySave').addEventListener('click', function () {
+    var k = $('keyInput').value.trim(); if (!k) { $('keyState').textContent = 'Paste the key into the box first.'; return; }
+    apiKey = k; try { localStorage.setItem(KEY_STORE, k); } catch (e) {} $('keyInput').value = ''; syncPrefs(); $('keyModal').hidden = true;
+  });
+  $('keyRemove').addEventListener('click', function () { apiKey = ''; try { localStorage.removeItem(KEY_STORE); } catch (e) {} syncPrefs(); openKey(); });
+  $('memoryBtn').addEventListener('click', function () { $('memText').value = memory; $('memModal').hidden = false; });
+  $('memClose').addEventListener('click', function () { $('memModal').hidden = true; });
+  $('memSave').addEventListener('click', function () { memory = $('memText').value; save(MEM_STORE, memory); $('memModal').hidden = true; });
+
+  if (!document.querySelector('#model option[value="' + prefs.model + '"]')) prefs.model = 'claude-haiku-5-5';
+  syncPrefs(); renderAll(); setState('idle');
+  window.__axiom = { send: send, chat: function () { return chat; }, state: function () { return state; } };
+})();
+</script>
+</body>
+</html>
