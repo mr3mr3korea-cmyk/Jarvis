@@ -190,6 +190,12 @@
   .modal .panel { max-width: 440px; width: 100%; pointer-events: auto; display: grid; gap: 10px; }
   .modal .hint { margin: 0; } .modal input { width: 100%; }
   .modal .mapbox { max-width: 900px; }
+  .modal .panel { max-height: 90vh; overflow-y: auto; }
+  .todos { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .todos li { display: flex; align-items: center; gap: 8px; }
+  .todos li span { flex: 1 1 auto; overflow-wrap: anywhere; } .todos .done { text-decoration: line-through; color: var(--muted); }
+  .todos input { width: 18px; height: 18px; flex: none; accent-color: var(--holo); }
+  .modal .ask { margin-top: 0; }
   #map { width: 100%; height: auto; display: block; border: 1px solid var(--line); cursor: crosshair; touch-action: manipulation; }
   .modal .btnrow { justify-content: flex-start; }
 
@@ -224,7 +230,7 @@
   <div class="row">
     <div>
       <h1>Hand Spin Hologram</h1>
-      <p class="sub">Camera hand tracking, 21 points per hand</p>
+      <p class="sub">Hand tracking, 3D builder, assistant, music and everyday helper</p>
       <div class="assist" id="assist" data-state="off">
         <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
         <div>
@@ -258,6 +264,7 @@
         <li><b>Move it</b>: left, right, up, down, center, corner, or "top left", "bottom right"</li>
         <li><b>Build</b>: "add cube", "add sphere", ring, pyramid, cylinder, cone; then next, remove, clear</li>
         <li><b>Colour</b>: say red, blue, green, purple, pink, orange, yellow, teal, white, grey or cyan; "paint red" recolours a whole design</li>
+        <li><b>Helper</b>: say "brief", "weather", "helper", "music", "skip", "screen" or "blueprint"; ask Orbit to set a timer or add a task</li>
         <li><b>Town</b>: say "map", tap a place, and a whole town for that region is built; say "here" to use your own location</li>
         <li><b>Image info</b>: say "explain" and the AI tells you what your image shows; "Orbit, ..." questions can be about the image too</li>
         <li><b>Style</b>: say "solid" for realistic lit 3D, or "wireframe" for glowing lines</li>
@@ -272,6 +279,11 @@
         <button id="voice" class="ghost" type="button" aria-pressed="false">Assistant: off</button>
         <button id="sound" class="ghost" type="button" aria-pressed="true">Sound: on</button>
         <button id="style" class="ghost" type="button" aria-pressed="true">Style: solid</button>
+      </div>
+      <div class="btnrow">
+        <button id="helperBtn" class="ghost" type="button">Helper</button>
+        <button id="musicBtn" class="ghost" type="button" aria-pressed="false">Music</button>
+        <button id="screenBtn" class="ghost" type="button">Read screen</button>
       </div>
       <div class="seg" role="group" aria-label="Shape">
         <button type="button" id="shape-globe" data-shape="globe" aria-pressed="true">Globe</button>
@@ -357,6 +369,34 @@
         <dt>Tracking</dt><dd id="rFps">0 fps</dd>
       </dl>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="helperModal" hidden>
+  <div class="panel" role="dialog" aria-labelledby="helperTitle">
+    <h2 id="helperTitle">Everyday helper</h2>
+    <p class="hint" id="helperClock"></p>
+    <div class="btnrow"><button class="mini" type="button" id="briefBtn">Brief me</button><button class="mini" type="button" id="weatherBtn">Weather here</button></div>
+    <p class="hint" id="briefLine" role="status"></p>
+    <p class="hint" id="weatherLine" role="status"></p>
+    <h2>Timer</h2>
+    <form class="ask" id="timerForm"><input type="number" id="timerMin" min="0.1" max="1440" step="any" value="5" aria-label="Timer length in minutes"><button class="mini" type="submit">Start minutes</button><button class="mini" type="button" id="timerCancel">Cancel</button></form>
+    <p class="hint" id="timerState" role="status">No timer running.</p>
+    <h2>Tasks</h2>
+    <form class="ask" id="todoForm"><input type="text" id="todoText" placeholder="Add a task" autocomplete="off" aria-label="New task"><button class="mini" type="submit">Add</button></form>
+    <ul class="todos" id="todoList"></ul>
+    <div class="btnrow"><button class="mini" type="button" id="helperClose">Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="musicModal" hidden>
+  <div class="panel" role="dialog" aria-labelledby="musicTitle">
+    <h2 id="musicTitle">Music</h2>
+    <p class="hint" id="musicNow" role="status"></p>
+    <div class="btnrow"><button class="mini" type="button" id="musicPlay">Play</button><button class="mini" type="button" id="musicNext">Next track</button><button class="mini" type="button" id="musicSrc">Source: built-in</button></div>
+    <label class="slider" for="musicVol">Volume <input type="range" id="musicVol" min="0" max="100" value="50"></label>
+    <p class="hint">Three built-in tracks are generated live. To play your own, add audio files from this device; they stay on the device.</p>
+    <div class="btnrow"><input type="file" id="musicFiles" accept="audio/*" multiple class="vh"><label class="filebtn" for="musicFiles">Add my songs</label><button class="mini" type="button" id="musicClose">Close</button></div>
   </div>
 </div>
 
@@ -1029,7 +1069,7 @@
     panTarget.x = pan.x; panTarget.y = pan.y;
   }
   function midX() { return W / 2 + pan.x * W; }
-  function midY() { return H / 2 + pan.y * H; }
+  function midY() { return H * 0.45 + pan.y * H; } // a little above centre, clear of the controls
   function moveDist(k) { distTarget = Math.max(2.2, Math.min(12, distTarget * k)); }
   var vel = { x: 0, y: 0 };            // radians per second: x = around vertical axis, y = around horizontal axis
   var spinning = !reduceMotion, rate = 1; // slow drift when nobody is touching it; voice can stop or change it
@@ -1166,15 +1206,18 @@
   }
   function say(text) { note.textContent = text; note.hidden = !text; }
 
-  async function startCamera() {
-    startBtn.disabled = true; say('');
+  async function startCamera(quiet) { // quiet === true: tried automatically when the page opens, so no error message if it is refused
+    quiet = quiet === true;
+    startBtn.disabled = true; if (!quiet) say('');
     setChip('search', 'Asking for the camera');
     var stream;
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nocam');
       stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 540 } } });
     } catch (e) {
-      startBtn.disabled = false; setChip('off', 'Camera blocked'); SFX.error(); log('Orbit', 'Camera blocked.');
+      startBtn.disabled = false;
+      if (quiet) { setChip('off', 'Camera off'); return; }
+      setChip('off', 'Camera blocked'); SFX.error(); log('Orbit', 'Camera blocked.');
       say('The camera is blocked on this page. Inside the Claude app that is expected: open this page at its own web address and tap Allow. Until then, drag with a finger to spin.');
       return;
     }
@@ -1444,7 +1487,8 @@
     robot: 'gen:robot', android: 'gen:robot', alien: 'gen:alien', character: 'gen:character', figure: 'gen:figure', hero: 'gen:figure',
     again: 'gen:again', regenerate: 'gen:again', random: 'gen:again',
     explain: 'explain', describe: 'explain', map: 'map', world: 'map', atlas: 'map', here: 'here', location: 'here',
-    solid: 'style:solid', realistic: 'style:solid', wireframe: 'style:wire', lines: 'style:wire',
+    solid: 'style:solid', realistic: 'style:solid', wireframe: 'style:wire', lines: 'style:wire', blueprint: 'style:blueprint', drawing: 'style:blueprint',
+    music: 'music', song: 'music', skip: 'music:next', screen: 'screen', helper: 'helper', tasks: 'helper', timer: 'helper', brief: 'brief', briefing: 'brief', weather: 'weather',
     closer: 'closer', close: 'closer', nearer: 'closer', near: 'closer', forward: 'closer',
     further: 'further', farther: 'further', far: 'further', away: 'further', back: 'further', backward: 'further',
     hello: 'hello', hi: 'hello', hey: 'hello', help: 'help', commands: 'help',
@@ -1484,7 +1528,13 @@
     else if (c === 'map') { if (!silent) { setShape('build'); openMap(); speak('World map open. Tap a place.', true); refreshAssist(); } return; }
     else if (c === 'here') { if (!silent) { setShape('build'); useMyLocation(); refreshAssist(); } return; }
     else if (c === 'explain') { if (!silent) { setShape('image'); explainImage(); refreshAssist(); } return; }
-    else if (c.indexOf('style:') === 0) { var gotSolid = setStyle(c === 'style:solid'); say2 = gotSolid ? 'Solid surfaces on.' : 'Wireframe view.'; }
+    else if (c.indexOf('style:') === 0) { setStyle(c.slice(6)); say2 = solidOn ? 'Solid surfaces on.' : blueprint ? 'Blueprint drawing.' : 'Wireframe view.'; }
+    else if (c === 'music' || c === 'music:on' || c === 'music:off') { var want = c === 'music' ? !music.on : c === 'music:on'; if (want) playMusic(); else stopMusic(); say2 = want ? 'Music on: ' + nowPlaying() + '.' : 'Music off.'; }
+    else if (c === 'music:next') { nextTrack(); say2 = 'Now playing ' + nowPlaying() + '.'; }
+    else if (c === 'screen') { if (!silent) { readScreen(); refreshAssist(); } return; }
+    else if (c === 'helper') { if (!silent) { openHelper(); speak('Helper open. Say Orbit, set a timer for five minutes, or add a task.', true); refreshAssist(); } return; }
+    else if (c === 'brief') { if (!silent) { brief(); refreshAssist(); } return; }
+    else if (c === 'weather') { if (!silent) { openHelper(); weatherHere(); refreshAssist(); } return; }
     else if (c.indexOf('color:') === 0) { setHolo(c.slice(6)); say2 = 'Colour set to ' + c.slice(6) + '.'; }
     else if (c.indexOf('paint:') === 0) { paintAll(c.slice(6)); setShape('build'); say2 = 'Design painted ' + c.slice(6) + '.'; }
     else if (c.indexOf('gen:') === 0) {
@@ -1511,7 +1561,7 @@
   var AI_URL = 'https://api.anthropic.com/v1/messages', AI_MODEL = 'claude-haiku-5-5', KEY_STORE = 'orbit_ai_key';
   var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further', 'left', 'right', 'up', 'down', 'center', 'build',
                  'gen:city', 'gen:tower', 'gen:bridge', 'gen:dome', 'gen:house', 'gen:robot', 'gen:alien', 'gen:figure']
-                .concat(Object.keys(COLORS).map(function (n) { return 'color:' + n; }), ['style:solid', 'style:wire']);
+                .concat(Object.keys(COLORS).map(function (n) { return 'color:' + n; }), ['style:solid', 'style:wire', 'style:blueprint', 'music:on', 'music:off', 'music:next']);
   var aiKey = '', chat = [];
   try { aiKey = localStorage.getItem(KEY_STORE) || ''; } catch (err) {}
   function keyUI() {
@@ -1542,7 +1592,8 @@
       '"actions" is a list of zero or more of: ' + ACTIONS.join(', ') + '. ' +
       'stop and spin control rotation; closer and further move the hologram toward or away from the screen; bigger and smaller change size by about 30 percent each; faster and slower change spin speed; ' +
       'globe, ring, cube and image switch the shape (image is a 3D model made from the user\'s photo); deeper and flatter change the image model depth; reset restores the start view. ' +
-      'style:solid shows models as solid lit 3D shapes and style:wire as glowing wireframes; ' +
+      'style:solid shows models as solid lit 3D shapes, style:wire as glowing wireframes and style:blueprint as a technical drawing with dimensions; ' +
+      'music:on, music:off and music:next control the music player; ' +
       'color:NAME (for example color:red) changes the hologram and interface colour, with NAME one of ' + Object.keys(COLORS).join(', ') + '; ' +
       'left, right, up, down and center move it around the screen; build shows the user\'s own multi-part model. ' +
       'Repeat an action to apply it more than once. Only use actions when the user asks for a change to the hologram. ' +
@@ -1556,17 +1607,21 @@
       'The actions gen:city, gen:tower, gen:bridge, gen:dome, gen:house, gen:robot, gen:alien and gen:figure run quick built-in generators instead; use one of those only when the user asks for exactly that with no details, and never together with "build". ' +
       'The current model has ' + parts.length + ' parts' + (parts.length <= 20 ? ': ' + JSON.stringify(parts) : '') + '. ' +
       (hasPhoto && shape === 'image' ? 'The user\'s photo from the Image tab is attached to their message; answer questions about it from what you can see, and never identify a real person from their face. ' : '') +
+      'You are also an everyday helper. To start a countdown include "timer": minutes (a number; 0 cancels it). To add to the user\'s task list include "todo": "the task" or a list of tasks. ' +
+      'Open tasks right now: ' + (todos.filter(function (t) { return !t.done; }).map(function (t) { return t.t; }).join('; ') || 'none') + '. ' + (timerEnd ? 'A timer is running with ' + Math.ceil((timerEnd - Date.now()) / 60000) + ' minutes left. ' : '') +
       'Current state: shape ' + shape + ', size ' + Math.round(zoom * 100) + ' percent (range 40 to 260), ' + (spinning ? 'rotating' : 'not rotating') +
       ', camera ' + (camOn ? 'on' : 'off') + ', hands in view ' + hands.length + '. Local time ' + new Date().toString() + '.';
   }
   function parseReply(text) {
-    var out = { say: '', actions: [], build: null, town: null }, a = text.indexOf('{'), b = text.lastIndexOf('}');
+    var out = { say: '', actions: [], build: null, town: null, timer: null, todos: [] }, a = text.indexOf('{'), b = text.lastIndexOf('}');
     if (a !== -1 && b > a) {
       try {
         var o = JSON.parse(text.slice(a, b + 1));
         if (typeof o.say === 'string') out.say = o.say;
         if (Array.isArray(o.build) && o.build.length) out.build = o.build;
         if (o.town && isFinite(+o.town.lat) && isFinite(+o.town.lon)) out.town = { lat: +o.town.lat, lon: +o.town.lon };
+        if (o.timer !== undefined && o.timer !== null && isFinite(+o.timer)) out.timer = +o.timer;
+        if (typeof o.todo === 'string' && o.todo.trim()) out.todos = [o.todo]; else if (Array.isArray(o.todo)) out.todos = o.todo.filter(function (t) { return typeof t === 'string' && t.trim(); }).slice(0, 10);
         if (Array.isArray(o.actions)) out.actions = o.actions.filter(function (x) { return ACTIONS.indexOf(x) !== -1; }).slice(0, 8);
         if (Array.isArray(o.build) && o.build.length) out.actions = out.actions.filter(function (x) { return x.indexOf('gen:') !== 0; });
       } catch (err) {}
@@ -1642,6 +1697,8 @@
       if (out.town) { makeTown(out.town.lat, out.town.lon); setShape('build'); SFX.powerup(); }
       else if (out.build) { setParts(out.build.slice(0, AI_PARTS), true); setShape('build'); SFX.powerup(); }
       out.actions.forEach(function (x) { command(x, null, true); });
+      if (out.timer !== null) { if (out.timer > 0) setTimer(out.timer); else cancelTimer(); }
+      out.todos.forEach(addTodo);
       say(''); thinking = false;
       speak(out.say || 'Done.', true);
     } catch (e) {
@@ -1736,29 +1793,60 @@
   function drawObject(holding) {
     var segs = SHAPES[shape], cx = midX(), cy = midY(), S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
     var isBuild = shape === 'build', assembling = isBuild && revealN < parts.length, groups = {}, keys = [];
+    var ex = [1e9, 1e9, -1e9, -1e9], lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9], L, ax;
     for (var i = 0; i < segs.length; i++) {
       var sg = segs[i], a = sg[0], b = sg[1], pi = sg[3];
       if (isBuild && pi >= revealN) continue;                                  // not assembled yet
       var az = R[6]*a[0] + R[7]*a[1] + R[8]*a[2], bz = R[6]*b[0] + R[7]*b[1] + R[8]*b[2];
       var fa = cam / (dist - az), fb = cam / (dist - bz);
       if (fa <= 0 || fb <= 0) continue;
-      var col = sg[2] === 0 ? (holding ? GRAB : HOLO) : sg[2] === 1 ? GRAB : sg[2];
+      var col = blueprint ? '255,255,255' : sg[2] === 0 ? (holding ? GRAB : HOLO) : sg[2] === 1 ? GRAB : sg[2];
       if (assembling && pi === revealN - 1) col = '255,255,255';               // the part that just locked in flashes white
       var thick = isBuild && !assembling && selShown && pi === sel ? 1 : 0, front = az + bz > 0 ? 1 : 0;
       var key = col + '|' + front + thick, g = groups[key];
       if (!g) { g = groups[key] = { col: col, front: front, thick: thick, p: [] }; keys.push(key); }
       g.p.push(cx + (R[0]*a[0] + R[1]*a[1] + R[2]*a[2]) * fa * S, cy - (R[3]*a[0] + R[4]*a[1] + R[5]*a[2]) * fa * S,
                cx + (R[0]*b[0] + R[1]*b[1] + R[2]*b[2]) * fb * S, cy - (R[3]*b[0] + R[4]*b[1] + R[5]*b[2]) * fb * S);
+      if (blueprint) { // remember how big it is on screen and in model units, for the dimension lines
+        L = g.p.length; ex[0] = Math.min(ex[0], g.p[L-4], g.p[L-2]); ex[2] = Math.max(ex[2], g.p[L-4], g.p[L-2]); ex[1] = Math.min(ex[1], g.p[L-3], g.p[L-1]); ex[3] = Math.max(ex[3], g.p[L-3], g.p[L-1]);
+        for (ax = 0; ax < 3; ax++) { lo[ax] = Math.min(lo[ax], a[ax], b[ax]); hi[ax] = Math.max(hi[ax], a[ax], b[ax]); }
+      }
     }
     for (var pass = 0; pass < 2; pass++) keys.forEach(function (key) {
       var g = groups[key], p = g.p; if (g.front !== pass) return;
       ctx.beginPath();
       for (var k = 0; k < p.length; k += 4) { ctx.moveTo(p[k], p[k+1]); ctx.lineTo(p[k+2], p[k+3]); }
-      ctx.strokeStyle = 'rgba(' + g.col + ',' + (pass ? 0.95 : 0.26) + ')';
-      ctx.lineWidth = (pass ? 1.6 : 1) + g.thick * 1.8; ctx.shadowBlur = pass ? 10 : 0; ctx.shadowColor = 'rgba(' + g.col + ',0.9)';
+      ctx.strokeStyle = 'rgba(' + g.col + ',' + (pass ? 0.95 : blueprint ? 0.42 : 0.26) + ')';
+      ctx.lineWidth = (pass ? (blueprint ? 1.3 : 1.6) : 1) + g.thick * 1.8; ctx.shadowBlur = pass && !blueprint ? 10 : 0; ctx.shadowColor = 'rgba(' + g.col + ',0.9)';
       ctx.stroke();
     });
     ctx.shadowBlur = 0;
+    if (blueprint && ex[2] > ex[0]) drawDims(ex, lo, hi);
+  }
+  // Blueprint paper and dimension lines
+  function drawPaper() {
+    ctx.fillStyle = '#0d3f86'; ctx.fillRect(0, 0, W, H);
+    var x, y; ctx.lineWidth = 1;
+    ctx.beginPath(); for (x = (W / 2) % 24; x < W; x += 24) { ctx.moveTo(x, 0); ctx.lineTo(x, H); } for (y = (H / 2) % 24; y < H; y += 24) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.stroke();
+    ctx.beginPath(); for (x = (W / 2) % 120; x < W; x += 120) { ctx.moveTo(x, 0); ctx.lineTo(x, H); } for (y = (H / 2) % 120; y < H; y += 120) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.stroke();
+  }
+  function drawDims(ex, lo, hi) {
+    var x0 = ex[0], y0 = ex[1], x1 = ex[2], y1 = ex[3], yb = Math.min(H - 20, y1 + 30), xl = Math.max(20, x0 - 30);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 1; ctx.font = '12px "IBM Plex Mono", ui-monospace, Menlo, monospace';
+    ctx.beginPath(); // width, under the drawing
+    ctx.moveTo(x0, yb); ctx.lineTo(x1, yb); ctx.moveTo(x0, y1 + 6); ctx.lineTo(x0, yb + 7); ctx.moveTo(x1, y1 + 6); ctx.lineTo(x1, yb + 7);
+    ctx.moveTo(x0, yb); ctx.lineTo(x0 + 8, yb - 4); ctx.moveTo(x0, yb); ctx.lineTo(x0 + 8, yb + 4); ctx.moveTo(x1, yb); ctx.lineTo(x1 - 8, yb - 4); ctx.moveTo(x1, yb); ctx.lineTo(x1 - 8, yb + 4);
+    // height, to the left
+    ctx.moveTo(xl, y0); ctx.lineTo(xl, y1); ctx.moveTo(xl - 7, y0); ctx.lineTo(x0 - 6, y0); ctx.moveTo(xl - 7, y1); ctx.lineTo(x0 - 6, y1);
+    ctx.moveTo(xl, y0); ctx.lineTo(xl - 4, y0 + 8); ctx.moveTo(xl, y0); ctx.lineTo(xl + 4, y0 + 8); ctx.moveTo(xl, y1); ctx.lineTo(xl - 4, y1 - 8); ctx.moveTo(xl, y1); ctx.lineTo(xl + 4, y1 - 8);
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.fillText('ON SCREEN ' + Math.round(x1 - x0) + ' px', (x0 + x1) / 2, yb - 6);
+    ctx.save(); ctx.translate(xl - 8, (y0 + y1) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(Math.round(y1 - y0) + ' px', 0, 0); ctx.restore();
+    ctx.fillText('MODEL  W ' + (hi[0] - lo[0]).toFixed(2) + '  H ' + (hi[1] - lo[1]).toFixed(2) + '  D ' + (hi[2] - lo[2]).toFixed(2) + ' units', (x0 + x1) / 2, yb + 20);
+    ctx.fillText('DRAWING: ' + (SHAPE_NAMES[shape] || shape).toUpperCase() + (shape === 'build' ? '  ·  ' + parts.length + ' PARTS' : '') + '  ·  ' + new Date().toLocaleDateString(), (x0 + x1) / 2, yb + 38);
   }
   // Projector under the object: base rings, a faint beam, and a scan bar while assembling or thinking.
   function drawProjector(now) {
@@ -1957,10 +2045,13 @@
       return true;
     } catch (err) { glFailed = true; gl = null; return false; }
   }
-  function setStyle(wantSolid) {
-    solidOn = !!wantSolid;
+  var blueprint = false;
+  function styleName() { return solidOn ? 'solid' : blueprint ? 'blueprint' : 'wire'; }
+  function setStyle(mode) { // 'solid', 'wire' or 'blueprint'; true and false still mean solid and wire
+    if (mode === true) mode = 'solid'; if (mode === false || !/^(solid|wire|blueprint)$/.test(mode)) mode = 'wire';
+    solidOn = mode === 'solid'; blueprint = mode === 'blueprint';
     if (solidOn && !initSolid()) { solidOn = false; say('Solid 3D could not start in this browser, so the wireframe style is being used.'); }
-    el('style').setAttribute('aria-pressed', String(solidOn)); el('style').textContent = solidOn ? 'Style: solid' : 'Style: wireframe';
+    el('style').setAttribute('aria-pressed', String(solidOn || blueprint)); el('style').textContent = 'Style: ' + (solidOn ? 'solid' : blueprint ? 'blueprint' : 'wireframe');
     return solidOn;
   }
 
@@ -2039,7 +2130,8 @@
       revealN = Math.min(parts.length, revealN + Math.ceil(parts.length / 60)); nextReveal = now + 55; SFX.rivet(revealN); if (revealN >= parts.length) SFX.lock();
     }
     if (thinking && now - lastScan > 520) { lastScan = now; SFX.scan(); }
-    drawBackdrop(now); drawProjector(now); drawDial(held);
+    if (blueprint) drawPaper(); else { drawBackdrop(now); drawProjector(now); }
+    drawDial(held); drawMusicBars();
     if (solidOn && drawSolid()) { /* drawn as solid, lit 3D */ } else if (shape === 'image') drawModel(); else drawObject(held);
     if (camOn) drawHands();
 
@@ -2062,11 +2154,183 @@
     }
     requestAnimationFrame(frame);
   }
+  /* ---------- read the screen: the user picks a tab, window or screen; one still picture of it goes to the AI ---------- */
+  async function readScreen() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      say('Reading your screen is not available in this browser. It works in Chrome, Edge or Safari on a computer, not on iPad or iPhone.'); speak('I cannot read the screen in this browser.', true); return;
+    }
+    if (!aiKey) { speak('I need an AI key to read your screen.', true); openKey(); return; }
+    var stream; try { stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }); } catch (err) { speak('Screen sharing was cancelled.', true); return; }
+    var shot = null;
+    try {
+      var v = document.createElement('video'); v.muted = true; v.playsInline = true; v.srcObject = stream; await v.play();
+      await new Promise(function (r) { setTimeout(r, 400); });
+      var k = Math.min(1, 1400 / Math.max(v.videoWidth || 1, v.videoHeight || 1)), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(v.videoWidth * k)); c.height = Math.max(1, Math.round(v.videoHeight * k));
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); shot = c.toDataURL('image/jpeg', 0.8).split(',')[1];
+    } catch (err) {}
+    stream.getTracks().forEach(function (t) { t.stop(); }); // sharing ends as soon as the picture is taken
+    if (!shot) { speak('I could not capture that.', true); return; }
+    var typed = el('askText').value.trim(); el('askText').value = '';
+    refImage = shot;
+    askAI('This is a screenshot of the tab, window or screen I chose to share from my computer. ' + (typed ? 'My question about it: ' + typed : 'Tell me what it shows and summarise the important content in up to six sentences.'));
+  }
+  el('screenBtn').addEventListener('click', readScreen);
+
+  /* ---------- music: built-in generated tracks, or the user's own audio files ---------- */
+  var music = { on: false, src: 'synth', track: 0, vol: 0.5, bus: null, an: null, data: null, nextT: 0, step: 0, files: [], fileIdx: 0, el: null, noise: null };
+  var TRACKS = [{ name: 'Ambient drift', bpm: 66, kick: false, arp: 2, wave: 'sine' }, { name: 'Pulse', bpm: 112, kick: true, arp: 1, wave: 'triangle' }, { name: 'Night drive', bpm: 92, kick: true, arp: 1, wave: 'sawtooth', bass: true }];
+  var PROG = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // A minor, F, C, G as note numbers
+  function hz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function musicBus() {
+    wakeAudio(); if (!actx) return null; if (music.bus) return music.bus;
+    music.bus = actx.createGain(); music.bus.gain.value = music.vol; music.an = actx.createAnalyser(); music.an.fftSize = 64; music.data = new Uint8Array(32);
+    music.bus.connect(music.an); music.an.connect(actx.destination);
+    music.noise = actx.createBuffer(1, actx.sampleRate / 2, actx.sampleRate); var d = music.noise.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return music.bus;
+  }
+  function tone(type, f, t, dur, vol, cutoff) {
+    var o = actx.createOscillator(), g = actx.createGain(), fl = actx.createBiquadFilter();
+    o.type = type; o.frequency.value = f; fl.type = 'lowpass'; fl.frequency.value = cutoff;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.05, dur / 4)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(fl); fl.connect(g); g.connect(music.bus); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function drum(t, kick) {
+    var g = actx.createGain(); g.connect(music.bus);
+    if (kick) { var o = actx.createOscillator(); o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.16); g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2); o.connect(g); o.start(t); o.stop(t + 0.22); }
+    else { var n = actx.createBufferSource(), f = actx.createBiquadFilter(); n.buffer = music.noise; f.type = 'highpass'; f.frequency.value = 7000; g.gain.setValueAtTime(0.09, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05); n.connect(f); f.connect(g); n.start(t); n.stop(t + 0.06); }
+  }
+  setInterval(function () { // schedule the next third of a second of notes
+    if (!music.on || music.src !== 'synth' || !actx || actx.state !== 'running' || !music.bus) return;
+    var tr = TRACKS[music.track], six = 60 / tr.bpm / 4;
+    if (music.nextT < actx.currentTime) music.nextT = actx.currentTime + 0.05;
+    try {
+      while (music.nextT < actx.currentTime + 0.35) {
+        var st = music.step, t = music.nextT, ch = PROG[Math.floor(st / 16) % 4];
+        if (st % 16 === 0) ch.forEach(function (n) { tone('sawtooth', hz(n), t, six * 17, 0.045, 900); tone('sawtooth', hz(n) * 1.005, t, six * 17, 0.035, 900); });
+        if (st % (2 * tr.arp) === 0) tone(tr.wave, hz(ch[Math.floor(st / (2 * tr.arp)) % 3] + 12 * (1 + ((st >> 3) & 1))), t, six * 1.9, 0.07, 2600);
+        if (tr.bass && st % 4 === 0) tone('square', hz(ch[0] - 24), t, six * 3, 0.06, 420);
+        if (tr.kick && st % 4 === 0) drum(t, true); if (tr.kick && st % 4 === 2) drum(t, false);
+        music.step++; music.nextT += six;
+      }
+    } catch (err) {}
+  }, 100);
+  function nowPlaying() { return music.src === 'files' && music.files.length ? music.files[music.fileIdx].name : TRACKS[music.track].name; }
+  function musicUI() {
+    el('musicBtn').setAttribute('aria-pressed', String(music.on)); el('musicBtn').textContent = music.on ? 'Music: on' : 'Music';
+    el('musicNow').textContent = (music.on ? 'Playing: ' : 'Ready: ') + nowPlaying();
+    el('musicPlay').textContent = music.on ? 'Pause' : 'Play';
+    el('musicSrc').textContent = music.src === 'files' ? 'Source: my songs' : 'Source: built-in';
+  }
+  function playFile() {
+    if (!music.files.length) return;
+    if (!music.el) { music.el = new Audio(); music.el.addEventListener('ended', function () { if (music.on && music.src === 'files') nextTrack(); }); try { actx.createMediaElementSource(music.el).connect(music.bus); } catch (err) {} }
+    music.el.src = music.files[music.fileIdx].url; music.el.volume = 1; var pr = music.el.play(); if (pr && pr.catch) pr.catch(function () {});
+  }
+  function playMusic() {
+    if (!musicBus()) { say('This browser cannot play the built-in music.'); return; }
+    music.on = true; if (music.src === 'files' && music.files.length) playFile(); else { music.src = 'synth'; music.nextT = 0; }
+    musicUI();
+  }
+  function stopMusic() { music.on = false; if (music.el) music.el.pause(); musicUI(); }
+  function nextTrack() {
+    if (music.src === 'files' && music.files.length) { music.fileIdx = (music.fileIdx + 1) % music.files.length; if (music.on) playFile(); }
+    else { music.track = (music.track + 1) % TRACKS.length; music.step = 0; }
+    musicUI();
+  }
+  function drawMusicBars() { // the dial grows a ring of level bars while music plays
+    if (!music.on || !music.an) return;
+    music.an.getByteFrequencyData(music.data);
+    var cx = midX(), cy = midY(), lim = Math.min(W, H) * 0.47, r = Math.min(lim, Math.min(W, H) * 0.27 * zoom * 1.62 * HOME_DIST / dist) + 30, i;
+    ctx.beginPath();
+    for (i = 0; i < 48; i++) { var a = i / 48 * 6.2832 - 1.5708, v = music.data[2 + (i < 24 ? i : 47 - i) % 24] / 255, len = 3 + v * 34; ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.lineTo(cx + Math.cos(a) * (r + len), cy + Math.sin(a) * (r + len)); }
+    ctx.strokeStyle = blueprint ? 'rgba(255,255,255,0.8)' : 'rgba(' + GRAB + ',0.85)'; ctx.lineWidth = 3; ctx.stroke();
+  }
+  el('musicBtn').addEventListener('click', function () { el('musicModal').hidden = false; musicUI(); });
+  el('musicClose').addEventListener('click', function () { el('musicModal').hidden = true; });
+  el('musicPlay').addEventListener('click', function () { if (music.on) stopMusic(); else playMusic(); });
+  el('musicNext').addEventListener('click', nextTrack);
+  el('musicSrc').addEventListener('click', function () { var was = music.on; stopMusic(); music.src = music.src === 'files' || !music.files.length ? 'synth' : 'files'; if (was) playMusic(); musicUI(); });
+  el('musicVol').addEventListener('input', function (e) { music.vol = e.target.value / 100; if (music.bus) music.bus.gain.value = music.vol; });
+  el('musicFiles').addEventListener('change', function (e) {
+    var fs = Array.prototype.slice.call(e.target.files || []); if (!fs.length) return;
+    fs.forEach(function (f) { music.files.push({ name: f.name.replace(/\.[^.]+$/, ''), url: URL.createObjectURL(f) }); });
+    e.target.value = ''; music.src = 'files'; music.fileIdx = music.files.length - fs.length; playMusic();
+  });
+
+  /* ---------- everyday helper: timer, task list, weather and a spoken briefing ---------- */
+  var todos = [], timerEnd = 0, weatherLine = '';
+  try { var tsaved = JSON.parse(localStorage.getItem('orbit_todos') || '[]'); if (Array.isArray(tsaved)) todos = tsaved.filter(function (t) { return t && typeof t.t === 'string'; }).slice(0, 100); } catch (err) {}
+  try { var te = +localStorage.getItem('orbit_timer'); if (te > Date.now()) timerEnd = te; } catch (err) {}
+  function saveTodos() { try { localStorage.setItem('orbit_todos', JSON.stringify(todos)); } catch (err) {} }
+  function renderTodos() {
+    var ul = el('todoList'); ul.textContent = '';
+    todos.forEach(function (t, i) {
+      var li = document.createElement('li'), cb = document.createElement('input'), sp = document.createElement('span'), rm = document.createElement('button');
+      cb.type = 'checkbox'; cb.checked = !!t.done; cb.id = 'todo-' + i; cb.setAttribute('aria-label', 'Done: ' + t.t);
+      cb.addEventListener('change', function () { t.done = cb.checked; saveTodos(); renderTodos(); });
+      sp.textContent = t.t; if (t.done) sp.className = 'done';
+      rm.type = 'button'; rm.className = 'mini'; rm.textContent = 'Remove'; rm.addEventListener('click', function () { todos.splice(i, 1); saveTodos(); renderTodos(); });
+      li.appendChild(cb); li.appendChild(sp); li.appendChild(rm); ul.appendChild(li);
+    });
+    if (!todos.length) { var e = document.createElement('li'); e.className = 'label'; e.textContent = 'No tasks yet.'; ul.appendChild(e); }
+  }
+  function addTodo(textIn) { var t = String(textIn || '').trim().slice(0, 200); if (!t || todos.length >= 100) return; todos.push({ t: t, done: false }); saveTodos(); renderTodos(); }
+  function setTimer(minutes) { minutes = Math.max(0.05, Math.min(1440, +minutes)); timerEnd = Date.now() + minutes * 60000; try { localStorage.setItem('orbit_timer', String(timerEnd)); } catch (err) {} tickHelper(); }
+  function cancelTimer() { timerEnd = 0; try { localStorage.removeItem('orbit_timer'); } catch (err) {} tickHelper(); }
+  function clockText(ms) { var sec = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (s2 < 10 ? '0' : '') + s2; }
+  function tickHelper() {
+    var now = Date.now(), d = new Date();
+    if (timerEnd && now >= timerEnd) { // time is up
+      timerEnd = 0; try { localStorage.removeItem('orbit_timer'); } catch (err) {}
+      for (var i = 0; i < 4; i++) { blip(880, 880, 0.14, 'square', 0.07, i * 0.3); blip(1320, 1320, 0.14, 'square', 0.06, i * 0.3 + 0.14); }
+      say('Timer finished.'); speak('Your timer has finished.', true);
+    }
+    el('helperBtn').textContent = timerEnd ? 'Helper ' + clockText(timerEnd - now) : 'Helper';
+    el('helperClock').textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + ', ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    el('timerState').textContent = timerEnd ? 'Time left: ' + clockText(timerEnd - now) : 'No timer running.';
+  }
+  setInterval(tickHelper, 500);
+  var WEATHER = { 0: 'clear sky', 1: 'mostly clear', 2: 'partly cloudy', 3: 'overcast', 45: 'fog', 48: 'fog', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle', 61: 'light rain', 63: 'rain', 65: 'heavy rain',
+                  71: 'light snow', 73: 'snow', 75: 'heavy snow', 77: 'snow grains', 80: 'rain showers', 81: 'rain showers', 82: 'heavy showers', 85: 'snow showers', 86: 'snow showers', 95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'thunderstorm with hail' };
+  function weatherHere() { // asks for the location, then asks the free Open-Meteo service for the current weather there
+    var out = el('weatherLine');
+    if (!navigator.geolocation) { out.textContent = 'This browser has no location service, so I cannot look up the weather.'; return; }
+    out.textContent = 'Finding the weather where you are…';
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      fetch('https://api.open-meteo.com/v1/forecast?latitude=' + pos.coords.latitude.toFixed(2) + '&longitude=' + pos.coords.longitude.toFixed(2) + '&current_weather=true')
+        .then(function (r) { if (!r.ok) throw new Error('bad'); return r.json(); })
+        .then(function (j) {
+          var w = j.current_weather; if (!w) throw new Error('none');
+          weatherLine = Math.round(w.temperature) + '°C, ' + (WEATHER[w.weathercode] || 'mixed conditions') + ', wind ' + Math.round(w.windspeed) + ' km/h';
+          out.textContent = 'Now: ' + weatherLine + '.'; speak('It is ' + weatherLine.replace('°C', ' degrees').replace('km/h', 'kilometres an hour') + '.', true);
+        })
+        .catch(function () { out.textContent = 'The weather service could not be reached. Inside the Claude app it is blocked; it works on the page\'s own web address.'; });
+    }, function () { out.textContent = 'Location is blocked for this page, so I cannot look up the weather. Allow location in the browser settings and try again.'; },
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+  }
+  function brief() {
+    var d = new Date(), open = todos.filter(function (t) { return !t.done; });
+    var line = 'It is ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' on ' + d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + '. ' +
+      (open.length ? 'You have ' + open.length + (open.length === 1 ? ' open task: ' : ' open tasks: ') + open.slice(0, 5).map(function (t) { return t.t; }).join(', ') + '. ' : 'Your task list is clear. ') +
+      (timerEnd ? 'A timer has ' + Math.ceil((timerEnd - Date.now()) / 60000) + ' minutes left. ' : '') + (weatherLine ? 'Weather: ' + weatherLine + '.' : '');
+    el('briefLine').textContent = line; speak(line, true);
+  }
+  function openHelper() { el('helperModal').hidden = false; renderTodos(); tickHelper(); }
+  el('helperBtn').addEventListener('click', openHelper);
+  el('helperClose').addEventListener('click', function () { el('helperModal').hidden = true; });
+  el('briefBtn').addEventListener('click', brief);
+  el('weatherBtn').addEventListener('click', weatherHere);
+  el('timerForm').addEventListener('submit', function (e) { e.preventDefault(); var m = +el('timerMin').value; if (m > 0) { setTimer(m); SFX.heard(); } });
+  el('timerCancel').addEventListener('click', cancelTimer);
+  el('todoForm').addEventListener('submit', function (e) { e.preventDefault(); addTodo(el('todoText').value); el('todoText').value = ''; });
+  renderTodos(); tickHelper(); musicUI();
+
   /* ---------- saved progress: kept in this browser's storage, so a reload carries on where you left off ---------- */
   var STATE_STORE = 'orbit_state', savedText = '', lastSaveCheck = 0;
   function snapshot() {
     return JSON.stringify({ shape: shape, zoom: +zoom.toFixed(3), dist: +distTarget.toFixed(3), pan: [+pan.x.toFixed(3), +pan.y.toFixed(3)],
-      R: R.map(function (v) { return +v.toFixed(4); }), spinning: spinning, rate: rate, color: holoName, sound: soundOn, solid: solidOn,
+      R: R.map(function (v) { return +v.toFixed(4); }), spinning: spinning, rate: rate, color: holoName, sound: soundOn, solid: solidOn, style: styleName(),
       depth: el('depthAmt').value, detail: el('detail').value, flip: el('flip').checked, kind: lastKind });
   }
   function saveProgress(now) {
@@ -2085,6 +2349,7 @@
     if (typeof o.spinning === 'boolean' && !reduceMotion) spinning = o.spinning;
     if (isFinite(+o.rate)) rate = Math.max(0.2, Math.min(8, +o.rate));
     if (o.solid === false) solidOn = false;
+    if (o.style === 'solid' || o.style === 'wire' || o.style === 'blueprint') { solidOn = o.style === 'solid'; blueprint = o.style === 'blueprint'; }
     if (o.sound === false) { soundOn = false; el('sound').setAttribute('aria-pressed', 'false'); el('sound').textContent = 'Sound: off'; }
     if (isFinite(+o.depth)) el('depthAmt').value = o.depth;
     if (isFinite(+o.detail)) el('detail').value = o.detail;
@@ -2094,11 +2359,12 @@
       document.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.shape === shape)); }); }
     savedText = snapshot();
   })();
-  el('style').addEventListener('click', function () { setStyle(!solidOn); });
-  setStyle(solidOn);
+  el('style').addEventListener('click', function () { setStyle(solidOn ? 'wire' : blueprint ? 'solid' : 'blueprint'); }); // solid, wireframe, blueprint, and round again
+  setStyle(styleName());
+  startCamera(true);
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, solid: function () { return { on: solidOn, ready: !!gl, failed: glFailed, groups: gl && gl.inst ? gl.inst.length : 0 }; }, town: makeTown, where: function (a, b) { return placeInfo(a, b); }, color: function () { return holoName; }, panNow: function () { return [pan.x, pan.y, panVel.x, panVel.y]; }, generate: generate, reveal: function () { return revealN; }, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, music: function () { return { on: music.on, src: music.src, now: nowPlaying(), level: music.data ? Math.max.apply(null, music.data) : 0 }; }, helper: function () { return { todos: todos, timer: timerEnd, style: styleName() }; }, setTimer: setTimer, solid: function () { return { on: solidOn, ready: !!gl, failed: glFailed, groups: gl && gl.inst ? gl.inst.length : 0 }; }, town: makeTown, where: function (a, b) { return placeInfo(a, b); }, color: function () { return holoName; }, panNow: function () { return [pan.x, pan.y, panVel.x, panVel.y]; }, generate: generate, reveal: function () { return revealN; }, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
