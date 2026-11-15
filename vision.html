@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VISION — Object Scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<style>
+  :root { --c: #35e6ff; --c2: #ffb648; --bg: #03080d; --dim: rgba(53,230,255,.55); }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: var(--bg); color: var(--c); overflow: hidden;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  #stage { position: fixed; inset: 0; }
+  video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  video { object-fit: cover; filter: saturate(.85) contrast(1.05) brightness(.9); }
+  video.mirror { transform: scaleX(-1); }
+  /* tint + scanlines */
+  #fx { position: absolute; inset: 0; pointer-events: none;
+    background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(0,10,18,.75) 100%),
+      linear-gradient(rgba(0,60,90,.18), rgba(0,60,90,.18)); }
+  #sweep { position: absolute; left: 0; right: 0; height: 90px; pointer-events: none; top: -90px;
+    background: linear-gradient(transparent, rgba(53,230,255,.13), rgba(53,230,255,.35) 98%, transparent);
+    animation: sweep 4s linear infinite; }
+  @keyframes sweep { to { top: 100%; } }
+
+  .hud { position: absolute; left: 0; right: 0; pointer-events: none; padding: 12px 14px; }
+  #top { top: 0; padding-top: calc(12px + env(safe-area-inset-top));
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+    background: linear-gradient(rgba(3,8,13,.8), transparent); }
+  #bottom { bottom: 0; padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(transparent, rgba(3,8,13,.9) 45%); }
+  .brand { font-size: 15px; letter-spacing: .35em; font-weight: 700; text-shadow: 0 0 10px var(--c); }
+  .sub { font-size: 10px; letter-spacing: .18em; color: var(--dim); margin-top: 4px; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c);
+    box-shadow: 0 0 8px var(--c); margin-right: 6px; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .stats { text-align: right; font-size: 10px; letter-spacing: .14em; line-height: 1.7; color: var(--dim); }
+  .stats b { color: var(--c); font-size: 13px; }
+
+  #say { font-size: 13px; letter-spacing: .06em; min-height: 18px; margin-bottom: 10px;
+    text-shadow: 0 0 8px rgba(53,230,255,.7); }
+  #say::before { content: "› "; color: var(--c2); }
+  #chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; margin-bottom: 12px; }
+  .chip { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; padding: 5px 9px;
+    border: 1px solid var(--dim); background: rgba(53,230,255,.08);
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .chip i { font-style: normal; color: var(--c2); margin-left: 6px; }
+  #controls { display: flex; gap: 8px; pointer-events: auto; }
+  button { font: inherit; color: var(--c); background: rgba(53,230,255,.08); border: 1px solid var(--c);
+    padding: 11px 12px; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; flex: 1; cursor: pointer; }
+  button:active { background: rgba(53,230,255,.3); }
+  button.off { color: var(--dim); border-color: rgba(53,230,255,.3); }
+
+  #boot { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 28px; gap: 22px; z-index: 5;
+    background: radial-gradient(circle at 50% 40%, #07202c, var(--bg) 70%); }
+  #boot.hide { display: none; }
+  .ring { width: 150px; height: 150px; border-radius: 50%; border: 2px solid rgba(53,230,255,.25);
+    border-top-color: var(--c); border-bottom-color: var(--c); position: relative;
+    animation: spin 5s linear infinite; box-shadow: 0 0 30px rgba(53,230,255,.25), inset 0 0 30px rgba(53,230,255,.15); }
+  .ring::after { content: ""; position: absolute; inset: 16px; border-radius: 50%;
+    border: 2px dashed rgba(255,182,72,.6); animation: spin 3s linear infinite reverse; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #boot h1 { font-size: 26px; letter-spacing: .5em; margin-right: -.5em; text-shadow: 0 0 16px var(--c); }
+  #boot p { font-size: 12px; letter-spacing: .08em; line-height: 1.7; color: var(--dim); max-width: 320px; }
+  #start { flex: none; padding: 15px 34px; font-size: 13px; box-shadow: 0 0 18px rgba(53,230,255,.35); }
+  #start:disabled { opacity: .5; }
+  #err { color: #ff6b6b; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="cam" playsinline muted autoplay></video>
+  <div id="fx"></div>
+  <div id="sweep"></div>
+  <canvas id="overlay"></canvas>
+
+  <div id="top" class="hud">
+    <div>
+      <div class="brand">VISION</div>
+      <div class="sub"><span class="dot"></span><span id="status">STANDBY</span></div>
+    </div>
+    <div class="stats">
+      OBJECTS <b id="count">0</b><br>
+      SCAN RATE <b id="fps">0</b>/s<br>
+      <span id="clock"></span>
+    </div>
+  </div>
+
+  <div id="bottom" class="hud">
+    <div id="say">Awaiting visual input.</div>
+    <div id="chips"></div>
+    <div id="controls">
+      <button id="flip">Flip camera</button>
+      <button id="voice">Voice: on</button>
+    </div>
+  </div>
+
+  <div id="boot">
+    <div class="ring"></div>
+    <h1>VISION</h1>
+    <p id="bootmsg">Real-time object identification system.<br>Camera video stays on your device — nothing is uploaded.</p>
+    <p id="err"></p>
+    <button id="start">Initialize</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var video = $('cam'), canvas = $('overlay'), ctx = canvas.getContext('2d');
+  var model = null, stream = null, facing = 'environment', running = false;
+  var voiceOn = true, lastSpoken = {}, tracks = [], frames = 0, lastFpsT = performance.now();
+
+  // ---------- voice ----------
+  function speak(text) {
+    $('say').textContent = text;
+    if (!voiceOn || !('speechSynthesis' in window)) return;
+    try {
+      if (speechSynthesis.speaking || speechSynthesis.pending) return; // don't queue up a backlog
+      var u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05; u.pitch = 0.9;
+      speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  // ---------- camera ----------
+  async function startCamera() {
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    video.classList.toggle('mirror', facing === 'user');
+    await video.play();
+  }
+
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(canvas.clientWidth * dpr);
+    canvas.height = Math.round(canvas.clientHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  // video pixels -> screen pixels (video is shown with object-fit: cover)
+  function mapBox(b) {
+    var cw = canvas.clientWidth, ch = canvas.clientHeight, vw = video.videoWidth, vh = video.videoHeight;
+    var s = Math.max(cw / vw, ch / vh), ox = (cw - vw * s) / 2, oy = (ch - vh * s) / 2;
+    var x = b[0] * s + ox, y = b[1] * s + oy, w = b[2] * s, h = b[3] * s;
+    if (facing === 'user') x = cw - x - w;
+    return [x, y, w, h];
+  }
+
+  // ---------- tracking (smooths the boxes so they glide instead of jitter) ----------
+  function updateTracks(preds) {
+    var now = performance.now();
+    preds.forEach(function (p) {
+      var box = mapBox(p.bbox), cx = box[0] + box[2] / 2, cy = box[1] + box[3] / 2;
+      var best = null, bestD = Infinity;
+      tracks.forEach(function (t) {
+        if (t.label !== p.class || t.seen === now) return;
+        var d = Math.hypot(t.box[0] + t.box[2] / 2 - cx, t.box[1] + t.box[3] / 2 - cy);
+        if (d < bestD && d < Math.max(box[2], box[3])) { bestD = d; best = t; }
+      });
+      if (best) { best.target = box; best.score = p.score; best.seen = now; }
+      else tracks.push({ label: p.class, box: box.slice(), target: box, score: p.score, seen: now, born: now });
+    });
+    tracks = tracks.filter(function (t) { return now - t.seen < 500; });
+  }
+
+  // ---------- drawing ----------
+  function draw() {
+    var cw = canvas.clientWidth, ch = canvas.clientHeight, now = performance.now();
+    ctx.clearRect(0, 0, cw, ch);
+
+    // centre reticle
+    ctx.strokeStyle = 'rgba(53,230,255,.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cw / 2, ch / 2, 22, 0, Math.PI * 2);
+    ctx.moveTo(cw / 2 - 34, ch / 2); ctx.lineTo(cw / 2 - 12, ch / 2);
+    ctx.moveTo(cw / 2 + 12, ch / 2); ctx.lineTo(cw / 2 + 34, ch / 2);
+    ctx.moveTo(cw / 2, ch / 2 - 34); ctx.lineTo(cw / 2, ch / 2 - 12);
+    ctx.moveTo(cw / 2, ch / 2 + 12); ctx.lineTo(cw / 2, ch / 2 + 34);
+    ctx.stroke();
+
+    tracks.forEach(function (t) {
+      for (var i = 0; i < 4; i++) t.box[i] += (t.target[i] - t.box[i]) * 0.25;
+      var x = t.box[0], y = t.box[1], w = t.box[2], h = t.box[3];
+      var age = Math.min((now - t.born) / 300, 1);            // lock-on animation
+      var pad = (1 - age) * 30; x -= pad; y -= pad; w += pad * 2; h += pad * 2;
+      var col = t.label === 'person' ? '#ffb648' : '#35e6ff';
+      var L = Math.max(10, Math.min(w, h) * 0.2);
+
+      ctx.globalAlpha = age;
+      ctx.fillStyle = col; ctx.globalAlpha = 0.06 * age; ctx.fillRect(x, y, w, h);
+      ctx.globalAlpha = age;
+      ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.shadowColor = col; ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(x, y + L); ctx.lineTo(x, y); ctx.lineTo(x + L, y);
+      ctx.moveTo(x + w - L, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + L);
+      ctx.moveTo(x + w, y + h - L); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - L, y + h);
+      ctx.moveTo(x + L, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - L);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // label tag
+      var text = t.label.toUpperCase() + '  ' + Math.round(t.score * 100) + '%';
+      ctx.font = '600 12px ui-monospace, Menlo, Consolas, monospace';
+      var tw = ctx.measureText(text).width + 14, ty = y - 24 < 4 ? y + 4 : y - 24;
+      var tx = Math.max(2, Math.min(x, cw - tw - 2));
+      ctx.fillStyle = col; ctx.globalAlpha = 0.9 * age; ctx.fillRect(tx, ty, tw, 20);
+      ctx.globalAlpha = age; ctx.fillStyle = '#03080d'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, tx + 7, ty + 10.5);
+      ctx.globalAlpha = 1;
+    });
+    requestAnimationFrame(draw);
+  }
+
+  // ---------- HUD text ----------
+  function a(word) { return (/^[aeiou]/.test(word) ? 'an ' : 'a ') + word; }
+  function updateHud(preds) {
+    var counts = {};
+    preds.forEach(function (p) { counts[p.class] = (counts[p.class] || 0) + 1; });
+    var names = Object.keys(counts);
+    $('count').textContent = preds.length;
+    $('chips').innerHTML = names.map(function (n) {
+      return '<span class="chip">' + n + (counts[n] > 1 ? '<i>×' + counts[n] + '</i>' : '') + '</span>';
+    }).join('');
+
+    // announce things that are new (or haven't been mentioned for a while)
+    var now = Date.now();
+    var fresh = names.filter(function (n) { return !lastSpoken[n] || now - lastSpoken[n] > 15000; });
+    names.forEach(function (n) { if (lastSpoken[n]) lastSpoken[n] = Math.max(lastSpoken[n], now - 12000); });
+    if (fresh.length) {
+      fresh.forEach(function (n) { lastSpoken[n] = now; });
+      var parts = fresh.slice(0, 3).map(function (n) { return counts[n] > 1 ? counts[n] + ' ' + n + 's' : a(n); });
+      var list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
+      speak('I see ' + list + '.');
+    } else if (!names.length) {
+      $('say').textContent = 'Scanning. No known objects in view.';
+    }
+  }
+
+  // ---------- detection loop ----------
+  async function loop() {
+    if (!running) return;
+    if (video.readyState >= 2 && video.videoWidth) {
+      try {
+        var preds = await model.detect(video, 20, 0.5);
+        updateTracks(preds);
+        updateHud(preds);
+        frames++;
+      } catch (e) { console.error(e); }
+    }
+    var now = performance.now();
+    if (now - lastFpsT > 1000) {
+      $('fps').textContent = Math.round(frames * 1000 / (now - lastFpsT));
+      frames = 0; lastFpsT = now;
+    }
+    setTimeout(loop, 0);
+  }
+
+  setInterval(function () { $('clock').textContent = new Date().toLocaleTimeString([], { hour12: false }); }, 1000);
+
+  // ---------- buttons ----------
+  $('start').addEventListener('click', async function () {
+    var btn = $('start'), msg = $('bootmsg'), err = $('err');
+    btn.disabled = true; err.textContent = '';
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+        throw new Error('This page cannot reach a camera here. Open it from a secure (https) web address in Safari or Chrome.');
+      if (!window.cocoSsd) throw new Error('The recognition engine failed to download. Check your internet connection and reload.');
+      speak('Initializing.');
+      msg.textContent = 'Requesting camera access…';
+      await startCamera();
+      msg.textContent = 'Loading recognition engine… (a few seconds the first time)';
+      if (!model) model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+      $('boot').classList.add('hide');
+      $('status').textContent = 'SCANNING';
+      resize(); running = true; loop(); requestAnimationFrame(draw);
+      speak('Systems online. Scanning.');
+    } catch (e) {
+      var m = e && e.message ? e.message : String(e);
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'))
+        m = 'Camera access was blocked. Allow the camera for this site in your browser settings, then try again.';
+      if (e && e.name === 'NotFoundError') m = 'No camera was found on this device.';
+      err.textContent = m; msg.textContent = ''; btn.disabled = false; btn.textContent = 'Try again';
+    }
+  });
+
+  $('flip').addEventListener('click', async function () {
+    facing = facing === 'environment' ? 'user' : 'environment';
+    tracks = [];
+    try { await startCamera(); } catch (e) { $('say').textContent = 'Could not switch camera.'; }
+  });
+
+  $('voice').addEventListener('click', function () {
+    voiceOn = !voiceOn;
+    this.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off');
+    this.classList.toggle('off', !voiceOn);
+    if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
+  });
+})();
+</script>
+</body>
+</html>
