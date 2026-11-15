@@ -225,7 +225,7 @@
         <li><b>Let go</b> while moving: throw it</li>
         <li><b>Pinch with both hands</b>: pull apart to zoom, twist to roll</li>
         <li><b>No camera</b>: drag with a finger or mouse</li>
-        <li><b>Say</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter, status, time, help, quiet</li>
+        <li><b>Say</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter, closer, further, status, time, help, quiet</li>
         <li><b>Say "Orbit"</b> then anything: ask the AI, or ask it to change the hologram</li>
       </ul>
     </details>
@@ -260,6 +260,7 @@
         <dt>Yaw</dt><dd id="rYaw">0°</dd>
         <dt>Pitch</dt><dd id="rPitch">0°</dd>
         <dt>Zoom</dt><dd id="rZoom">100%</dd>
+        <dt>Distance</dt><dd id="rDist">1.0x</dd>
         <dt>Hands</dt><dd id="rHands">0</dd>
         <dt>Tracking</dt><dd id="rFps">0 fps</dd>
       </dl>
@@ -366,6 +367,8 @@
   /* ---------- object state ---------- */
   var R = mul(rotX(0.35), rotY(-0.5));
   var zoom = 1;
+  var HOME_DIST = 3.4, dist = HOME_DIST, distTarget = HOME_DIST; // how far the object sits behind the screen; glides to its target
+  function moveDist(k) { distTarget = Math.max(2.2, Math.min(12, distTarget * k)); }
   var vel = { x: 0, y: 0 };            // radians per second: x = around vertical axis, y = around horizontal axis
   var spinning = !reduceMotion, rate = 1; // slow drift when nobody is touching it; voice can stop or change it
   function idle() { return spinning ? 0.18 * rate : 0; }
@@ -711,6 +714,8 @@
     ring: 'ring', donut: 'ring', doughnut: 'ring', cube: 'cube', box: 'cube', square: 'cube',
     image: 'image', picture: 'image', photo: 'image', model: 'image',
     deeper: 'deeper', deep: 'deeper', flatter: 'flatter', flat: 'flatter',
+    closer: 'closer', close: 'closer', nearer: 'closer', near: 'closer', forward: 'closer',
+    further: 'further', farther: 'further', far: 'further', away: 'further', back: 'further', backward: 'further',
     hello: 'hello', hi: 'hello', hey: 'hello', help: 'help', commands: 'help',
     time: 'time', date: 'date', today: 'date', thanks: 'thanks', thank: 'thanks',
     status: 'status', report: 'status', name: 'name', quiet: 'quiet', mute: 'quiet', silence: 'quiet', speak: 'unquiet', unmute: 'unquiet'
@@ -726,11 +731,13 @@
     else if (c === 'smaller') { setZoom(zoom / 1.3); say2 = zoom <= 0.4 ? 'That is the minimum size.' : 'Reducing.'; }
     else if (c === 'faster') { spinning = true; rate = Math.min(8, rate * 1.8); say2 = 'Speeding up.'; }
     else if (c === 'slower') { rate = Math.max(0.2, rate / 1.8); say2 = 'Slowing down.'; }
-    else if (c === 'reset') { R = mul(rotX(0.35), rotY(-0.5)); zoom = 1; rate = 1; vel.x = vel.y = 0; say2 = 'Back to the starting view.'; }
+    else if (c === 'reset') { R = mul(rotX(0.35), rotY(-0.5)); zoom = 1; rate = 1; distTarget = HOME_DIST; vel.x = vel.y = 0; say2 = 'Returned to the starting view.'; }
+    else if (c === 'closer') { moveDist(1 / 1.35); say2 = distTarget <= 2.2 ? 'That is as near as it goes.' : 'Bringing it nearer.'; }
+    else if (c === 'further') { moveDist(1.35); say2 = distTarget >= 12 ? 'That is the limit of its range.' : 'Pushing it out.'; }
     else if (c === 'deeper') { nudgeDepth(15); say2 = 'More depth.'; }
     else if (c === 'flatter') { nudgeDepth(-15); say2 = 'Less depth.'; }
     else if (c === 'hello') say2 = 'Hello. Ready when you are.';
-    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, a shape name, status, or time. Or say Orbit, then any question.';
+    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, closer, further, a shape name, status, or time. Or say Orbit, then any question.';
     else if (c === 'time') say2 = 'It is ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.';
     else if (c === 'date') say2 = 'Today is ' + new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
     else if (c === 'thanks') say2 = 'Any time.';
@@ -746,7 +753,7 @@
 
   /* ---------- AI brain: questions go to the Claude API using the key saved on this device ---------- */
   var AI_URL = 'https://api.anthropic.com/v1/messages', AI_MODEL = 'claude-haiku-5-5', KEY_STORE = 'orbit_ai_key';
-  var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter'];
+  var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further'];
   var aiKey = '', chat = [];
   try { aiKey = localStorage.getItem(KEY_STORE) || ''; } catch (err) {}
   function keyUI() {
@@ -775,7 +782,7 @@
       'Your reply is read aloud by a speech synthesiser, so answer in one to three short, plain sentences: no markdown, lists, emoji or symbols. ' +
       'You can also control the hologram. Reply ONLY with a JSON object of this form: {"say": "what to say aloud", "actions": []}. ' +
       '"actions" is a list of zero or more of: ' + ACTIONS.join(', ') + '. ' +
-      'stop and spin control rotation; bigger and smaller change size by about 30 percent each; faster and slower change spin speed; ' +
+      'stop and spin control rotation; closer and further move the hologram toward or away from the screen; bigger and smaller change size by about 30 percent each; faster and slower change spin speed; ' +
       'globe, ring, cube and image switch the shape (image is a 3D model made from the user\'s photo); deeper and flatter change the image model depth; reset restores the start view. ' +
       'Repeat an action to apply it more than once. Only use actions when the user asks for a change to the hologram. ' +
       'Current state: shape ' + shape + ', size ' + Math.round(zoom * 100) + ' percent (range 40 to 260), ' + (spinning ? 'rotating' : 'not rotating') +
@@ -898,12 +905,12 @@
 
   /* ---------- drawing ---------- */
   function drawObject(holding) {
-    var segs = SHAPES[shape], cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.27 * zoom, cam = 3.4;
+    var segs = SHAPES[shape], cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
     var groups = [[], [], [], []]; // back, front, back accent, front accent
     for (var i = 0; i < segs.length; i++) {
       var a = segs[i][0], b = segs[i][1];
       var az = R[6]*a[0] + R[7]*a[1] + R[8]*a[2], bz = R[6]*b[0] + R[7]*b[1] + R[8]*b[2];
-      var fa = cam / (cam - az), fb = cam / (cam - bz);
+      var fa = cam / (dist - az), fb = cam / (dist - bz);
       groups[(az + bz > 0 ? 1 : 0) + (segs[i][2] ? 2 : 0)].push(
         cx + (R[0]*a[0] + R[1]*a[1] + R[2]*a[2]) * fa * S, cy - (R[3]*a[0] + R[4]*a[1] + R[5]*a[2]) * fa * S,
         cx + (R[0]*b[0] + R[1]*b[1] + R[2]*b[2]) * fb * S, cy - (R[3]*b[0] + R[4]*b[1] + R[5]*b[2]) * fb * S);
@@ -941,7 +948,7 @@
   // Dial around the object: tick ring turns with yaw, inner dashes with pitch, outer arc shows zoom.
   function drawDial(holding) {
     var cx = W / 2, cy = H / 2, col = holding ? GRAB : HOLO, lim = Math.min(W, H) * 0.47;
-    var r = Math.min(lim, Math.min(W, H) * 0.27 * zoom * 1.62);
+    var r = Math.min(lim, Math.min(W, H) * 0.27 * zoom * 1.62 * HOME_DIST / dist);
     var yaw = Math.atan2(R[2], R[8]), pitch = Math.asin(Math.max(-1, Math.min(1, -R[5]))), i, a;
     ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(' + col + ',0.22)';
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.stroke();
@@ -968,10 +975,10 @@
   }
 
   function drawModel() {
-    var m = model, n = m.n, pos = m.pos, cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.27 * zoom, cam = 3.4;
+    var m = model, n = m.n, pos = m.pos, cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
     for (var i = 0, q = 0; i < n; i++, q += 3) {
       var x = pos[q], y = pos[q+1], z = pos[q+2];
-      var rz = R[6]*x + R[7]*y + R[8]*z, f = cam / (cam - rz);
+      var rz = R[6]*x + R[7]*y + R[8]*z, f = cam / (dist - rz);
       m.sx[i] = cx + (R[0]*x + R[1]*y + R[2]*z) * f * S; m.sy[i] = cy - (R[3]*x + R[4]*y + R[5]*z) * f * S;
       m.sz[i] = rz; m.sf[i] = f;
     }
@@ -1026,6 +1033,7 @@
       var I = idle(); vel.x = I + (vel.x - I) * damp; vel.y *= damp;
     }
     R = tidy(R);
+    dist += (distTarget - dist) * Math.min(1, dt * 5);
 
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.fillStyle = '#050b14'; ctx.fillRect(0, 0, W, H);
@@ -1050,6 +1058,7 @@
       el('rYaw').textContent = Math.round(Math.atan2(R[2], R[8]) * 57.2958) + '°';
       el('rPitch').textContent = Math.round(Math.asin(Math.max(-1, Math.min(1, -R[5]))) * 57.2958) + '°';
       el('rZoom').textContent = Math.round(zoom * 100) + '%';
+      el('rDist').textContent = (dist / HOME_DIST).toFixed(1) + 'x';
       el('rHands').textContent = String(hands.length);
       el('rFps').textContent = (camOn && now - lastResultAt < 1000 ? Math.round(trackFps) : 0) + ' fps';
     }
@@ -1057,7 +1066,7 @@
   }
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
