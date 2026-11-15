@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Hand Spin Hologram</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Layout idea: one full-screen stage (camera + hologram on a canvas) with a thin
+     instrument frame around it: name and state on top, gestures and readouts below. */
+  :root {
+    color-scheme: dark;
+    --void: #050b14;          /* stage background, blue-biased black */
+    --panel: rgba(9, 22, 38, 0.72);
+    --line: rgba(110, 200, 255, 0.22);
+    --holo: #6fd6ff;          /* hologram and tracking colour */
+    --grab: #ffb347;          /* accent: only while a hand is holding the object */
+    --text: #d9ecf8;
+    --muted: #7f9bb0;
+    --font-display: "Chakra Petch", "Avenir Next Condensed", "Trebuchet MS", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--void);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.45;
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #stage.dragging { cursor: grabbing; }
+  video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+  .hud { position: fixed; inset: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 16px; gap: 12px; pointer-events: none; }
+  .hud > * { pointer-events: none; }
+  .row { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+  .row.bottom { align-items: flex-end; }
+
+  h1 { font-family: var(--font-display); font-weight: 600; font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; text-wrap: balance; }
+  .sub { color: var(--muted); margin: 2px 0 0; font-size: 12px; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    font-family: var(--font-display); font-weight: 500; font-size: 14px; letter-spacing: 0.04em;
+  }
+  .chip .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .chip[data-state="search"] .dot { background: var(--holo); animation: pulse 1.2s ease-in-out infinite; }
+  .chip[data-state="found"] .dot { background: var(--holo); box-shadow: 0 0 10px var(--holo); }
+  .chip[data-state="grab"] { border-color: var(--grab); color: var(--grab); }
+  .chip[data-state="grab"] .dot { background: var(--grab); box-shadow: 0 0 12px var(--grab); }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    max-width: 340px;
+  }
+  .panel h2 { font-family: var(--font-display); font-weight: 500; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  .gestures { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+  .gestures b { color: var(--holo); font-weight: 500; }
+
+  .readout { display: grid; grid-template-columns: auto auto; column-gap: 14px; row-gap: 2px; font-variant-numeric: tabular-nums; }
+  .readout dt { color: var(--muted); }
+  .readout dd { margin: 0; text-align: right; min-width: 6ch; }
+
+  .controls { display: flex; flex-direction: column; gap: 10px; align-items: center; pointer-events: auto; margin: 0 auto; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--grab); outline-offset: 2px; }
+  #start {
+    font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: 0.06em;
+    padding: 12px 22px; border-radius: 999px; border: 1px solid var(--holo);
+    background: rgba(111, 214, 255, 0.14); color: var(--holo);
+    box-shadow: 0 0 24px rgba(111, 214, 255, 0.25);
+  }
+  #start:disabled { opacity: 0.6; cursor: default; }
+  #start[hidden] { display: none; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); overflow: hidden; }
+  .seg button { background: none; border: 0; padding: 8px 16px; font-family: var(--font-display); font-weight: 500; font-size: 14px; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: rgba(111, 214, 255, 0.16); color: var(--holo); }
+
+  #note {
+    align-self: center; max-width: 520px; text-align: center;
+    background: var(--panel); border: 1px solid var(--grab); color: var(--text);
+    border-radius: 10px; padding: 10px 14px;
+  }
+  #note[hidden] { display: none; }
+
+  @media (max-width: 640px) {
+    .hud { padding: 16px; }
+    h1 { font-size: 17px; }
+    .panel { max-width: none; flex: 0 0 auto; padding: 10px 12px; }
+    .row.bottom { flex-direction: column-reverse; align-items: stretch; }
+    #readoutPanel { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .chip .dot { animation: none !important; } }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="Hologram you can spin with your hand"></canvas>
+<video id="cam" playsinline muted autoplay></video>
+
+<div class="hud">
+  <div class="row">
+    <div>
+      <h1>Hand Spin Hologram</h1>
+      <p class="sub">Camera hand tracking, 21 points per hand</p>
+    </div>
+    <div class="chip" id="chip" data-state="off"><span class="dot"></span><span id="chipText">Camera off</span></div>
+  </div>
+
+  <div id="note" role="status" hidden></div>
+
+  <div class="row bottom">
+    <div class="panel">
+      <h2>Gestures</h2>
+      <ul class="gestures">
+        <li><b>Pinch</b> thumb and index finger, then move: spin it</li>
+        <li><b>Let go</b> while moving: throw it</li>
+        <li><b>Pinch with both hands</b>: pull apart to zoom, twist to roll</li>
+        <li><b>No camera</b>: drag with a finger or mouse</li>
+      </ul>
+    </div>
+
+    <div class="controls">
+      <button id="start" type="button">Start camera</button>
+      <div class="seg" role="group" aria-label="Shape">
+        <button type="button" id="shape-globe" data-shape="globe" aria-pressed="true">Globe</button>
+        <button type="button" id="shape-ring" data-shape="ring" aria-pressed="false">Ring</button>
+        <button type="button" id="shape-cube" data-shape="cube" aria-pressed="false">Cube</button>
+      </div>
+    </div>
+
+    <div class="panel" id="readoutPanel">
+      <h2>Readout</h2>
+      <dl class="readout">
+        <dt>Yaw</dt><dd id="rYaw">0°</dd>
+        <dt>Pitch</dt><dd id="rPitch">0°</dd>
+        <dt>Zoom</dt><dd id="rZoom">100%</dd>
+        <dt>Hands</dt><dd id="rHands">0</dd>
+        <dt>Tracking</dt><dd id="rFps">0 fps</dd>
+      </dl>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/';
+  var HOLO = '111, 214, 255', GRAB = '255, 179, 71';
+  var CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+              [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+  var canvas = document.getElementById('stage'), ctx = canvas.getContext('2d');
+  var video = document.getElementById('cam');
+  var chip = document.getElementById('chip'), chipText = document.getElementById('chipText');
+  var note = document.getElementById('note'), startBtn = document.getElementById('start');
+  var el = function (id) { return document.getElementById(id); };
+  var reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  }
+  window.addEventListener('resize', resize); resize();
+
+  /* ---------- 3D maths ---------- */
+  function mul(a, b) {
+    var r = new Array(9);
+    for (var i = 0; i < 3; i++) for (var j = 0; j < 3; j++)
+      r[i*3+j] = a[i*3]*b[j] + a[i*3+1]*b[3+j] + a[i*3+2]*b[6+j];
+    return r;
+  }
+  function rotX(a) { var c = Math.cos(a), s = Math.sin(a); return [1,0,0, 0,c,-s, 0,s,c]; }
+  function rotY(a) { var c = Math.cos(a), s = Math.sin(a); return [c,0,s, 0,1,0, -s,0,c]; }
+  function rotZ(a) { var c = Math.cos(a), s = Math.sin(a); return [c,-s,0, s,c,0, 0,0,1]; }
+  function tidy(m) { // keep the matrix a clean rotation after many small steps
+    var x = [m[0],m[1],m[2]], y = [m[3],m[4],m[5]];
+    var n = Math.hypot(x[0],x[1],x[2]); x = [x[0]/n,x[1]/n,x[2]/n];
+    var d = x[0]*y[0]+x[1]*y[1]+x[2]*y[2]; y = [y[0]-d*x[0],y[1]-d*x[1],y[2]-d*x[2]];
+    n = Math.hypot(y[0],y[1],y[2]); y = [y[0]/n,y[1]/n,y[2]/n];
+    var z = [x[1]*y[2]-x[2]*y[1], x[2]*y[0]-x[0]*y[2], x[0]*y[1]-x[1]*y[0]];
+    return [x[0],x[1],x[2], y[0],y[1],y[2], z[0],z[1],z[2]];
+  }
+
+  /* ---------- shapes: lists of line segments, flag 1 = accent ---------- */
+  function circle(segs, n, flag, fn) {
+    var prev = fn(0);
+    for (var i = 1; i <= n; i++) { var p = fn(i / n * Math.PI * 2); segs.push([prev, p, flag]); prev = p; }
+  }
+  function buildGlobe() {
+    var s = [];
+    for (var k = 0; k < 6; k++) (function (lon) {
+      circle(s, 48, 0, function (t) { return [Math.cos(t)*Math.cos(lon), Math.sin(t), Math.cos(t)*Math.sin(lon)]; });
+    })(k * Math.PI / 6);
+    [-60,-30,0,30,60].forEach(function (deg) {
+      var lat = deg * Math.PI / 180, r = Math.cos(lat), y = Math.sin(lat);
+      circle(s, 48, 0, function (t) { return [r*Math.cos(t), y, r*Math.sin(t)]; });
+    });
+    s.push([[0,-1.25,0],[0,1.25,0],0]);
+    var tilt = 0.45;
+    circle(s, 64, 1, function (t) { var x = 1.32*Math.cos(t), z = 1.32*Math.sin(t); return [x, z*Math.sin(tilt), z*Math.cos(tilt)]; });
+    return s;
+  }
+  function buildRing() {
+    var s = [], R = 0.9, r = 0.34;
+    function pt(u, v) { var q = R + r*Math.cos(v); return [q*Math.cos(u), r*Math.sin(v), q*Math.sin(u)]; }
+    for (var i = 0; i < 28; i++) (function (u) { circle(s, 14, i % 7 === 0 ? 1 : 0, function (v) { return pt(u, v); }); })(i / 28 * Math.PI * 2);
+    for (var j = 0; j < 8; j++) (function (v) { circle(s, 56, 0, function (u) { return pt(u, v); }); })(j / 8 * Math.PI * 2);
+    return s;
+  }
+  function buildCube() {
+    var s = [];
+    function box(h, flag) {
+      var c = []; for (var i = 0; i < 8; i++) c.push([(i&1?h:-h), (i&2?h:-h), (i&4?h:-h)]);
+      for (var a = 0; a < 8; a++) for (var b = a+1; b < 8; b++) { var d = a ^ b; if (d===1||d===2||d===4) s.push([c[a], c[b], flag]); }
+      return c;
+    }
+    var o = box(0.85, 0), n = box(0.4, 1);
+    for (var i = 0; i < 8; i++) s.push([o[i], n[i], 0]);
+    return s;
+  }
+  var SHAPES = { globe: buildGlobe(), ring: buildRing(), cube: buildCube() };
+  var shape = 'globe';
+
+  /* ---------- object state ---------- */
+  var R = mul(rotX(0.35), rotY(-0.5));
+  var zoom = 1;
+  var vel = { x: 0, y: 0 };            // radians per second: x = around vertical axis, y = around horizontal axis
+  var IDLE = reduceMotion ? 0 : 0.18;  // slow drift when nobody is touching it
+  var held = false;                    // true while a hand or finger is holding the object
+
+  function spinBy(dx, dy, dt) {        // dx, dy in pixels
+    var k = Math.PI * 1.3 / Math.min(W, H);
+    var ax = dx * k, ay = dy * k;
+    R = mul(rotX(ay), mul(rotY(ax), R));
+    if (dt > 0) {
+      var mix = 0.45;
+      vel.x += (ax / dt - vel.x) * mix; vel.y += (ay / dt - vel.y) * mix;
+    }
+  }
+  function setZoom(z) { zoom = Math.max(0.4, Math.min(2.6, z)); }
+
+  /* ---------- gesture engine, shared by hands and touch ---------- */
+  // points: array of {id, x, y} in screen pixels that are currently "holding"
+  function makeGrabber() {
+    var mode = 'none', ids = '', last = null, d0 = 1, z0 = 1, a0 = 0, t0 = 0;
+    return function (points, now) {
+      if (points.length === 0) { mode = 'none'; ids = ''; return 'none'; }
+      var key = points.map(function (p) { return p.id; }).sort().join(',');
+      if (points.length === 1) {
+        var p = points[0];
+        if (mode !== 'spin' || key !== ids) { mode = 'spin'; ids = key; last = { x: p.x, y: p.y }; t0 = now; vel.x = vel.y = 0; return 'spin'; }
+        spinBy(p.x - last.x, p.y - last.y, (now - t0) / 1000);
+        last = { x: p.x, y: p.y }; t0 = now; return 'spin';
+      }
+      var a = points[0], b = points[1];
+      var d = Math.hypot(b.x - a.x, b.y - a.y) || 1, ang = Math.atan2(b.y - a.y, b.x - a.x);
+      if (mode !== 'zoom' || key !== ids) { mode = 'zoom'; ids = key; d0 = d; z0 = zoom; a0 = ang; vel.x = vel.y = 0; return 'zoom'; }
+      setZoom(z0 * d / d0);
+      var da = ang - a0; if (da > Math.PI) da -= Math.PI * 2; if (da < -Math.PI) da += Math.PI * 2;
+      R = mul(rotZ(-da), R); a0 = ang;
+      return 'zoom';
+    };
+  }
+
+  /* ---------- touch and mouse fallback ---------- */
+  var pointers = {}, touchGrab = makeGrabber(), touchMode = 'none';
+  function pointerList() { return Object.keys(pointers).map(function (k) { return pointers[k]; }); }
+  canvas.addEventListener('pointerdown', function (e) {
+    pointers[e.pointerId] = { id: 'p' + e.pointerId, x: e.clientX, y: e.clientY };
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    touchMode = touchGrab(pointerList(), performance.now()); canvas.classList.add('dragging');
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!pointers[e.pointerId]) return;
+    pointers[e.pointerId].x = e.clientX; pointers[e.pointerId].y = e.clientY;
+    touchMode = touchGrab(pointerList(), performance.now());
+  });
+  function pointerEnd(e) {
+    delete pointers[e.pointerId];
+    touchMode = touchGrab(pointerList(), performance.now());
+    if (touchMode === 'none') canvas.classList.remove('dragging');
+  }
+  canvas.addEventListener('pointerup', pointerEnd);
+  canvas.addEventListener('pointercancel', pointerEnd);
+  canvas.addEventListener('wheel', function (e) { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+
+  /* ---------- hand tracking ---------- */
+  var camOn = false, tracker = null, busy = false;
+  var hands = [];            // tracked hands: {id, lm, pinching, px, py, seen}
+  var nextHandId = 1, handGrab = makeGrabber(), handMode = 'none';
+  var lastResultAt = 0, trackFps = 0;
+
+  function videoRect() {     // camera picture is scaled to cover the screen
+    var vw = video.videoWidth || 4, vh = video.videoHeight || 3;
+    var s = Math.max(W / vw, H / vh), dw = vw * s, dh = vh * s;
+    return { x: (W - dw) / 2, y: (H - dh) / 2, w: dw, h: dh };
+  }
+  function toScreen(p, r) { return { x: r.x + (1 - p.x) * r.w, y: r.y + p.y * r.h }; } // mirrored like a mirror
+
+  function onResults(res) {
+    var now = performance.now();
+    if (lastResultAt) trackFps += (1000 / (now - lastResultAt) - trackFps) * 0.15;
+    lastResultAt = now;
+    var r = videoRect(), found = res.multiHandLandmarks || [], next = [], used = {};
+    for (var i = 0; i < found.length; i++) {
+      var lm = found[i];
+      var t = toScreen(lm[4], r), f = toScreen(lm[8], r), w = toScreen(lm[0], r), m = toScreen(lm[9], r);
+      var size = Math.hypot(m.x - w.x, m.y - w.y) || 1;          // wrist to middle knuckle: the hand's own ruler
+      var ratio = Math.hypot(t.x - f.x, t.y - f.y) / size;
+      var cx = (t.x + f.x) / 2, cy = (t.y + f.y) / 2;
+      var best = null, bestD = 0.3 * Math.max(W, H);              // match to the same hand as last frame
+      for (var j = 0; j < hands.length; j++) {
+        if (used[hands[j].id]) continue;
+        var d = Math.hypot(hands[j].px - cx, hands[j].py - cy);
+        if (d < bestD) { bestD = d; best = hands[j]; }
+      }
+      var h = best || { id: 'h' + (nextHandId++), pinching: false, px: cx, py: cy };
+      used[h.id] = true;
+      h.px += (cx - h.px) * 0.6; h.py += (cy - h.py) * 0.6;        // light smoothing against jitter
+      h.pinching = h.pinching ? ratio < 0.55 : ratio < 0.33;       // easier to keep a pinch than to start one
+      h.lm = lm; h.ratio = ratio;
+      next.push(h);
+    }
+    hands = next;
+    var holding = hands.filter(function (h) { return h.pinching; }).slice(0, 2)
+      .map(function (h) { return { id: h.id, x: h.px, y: h.py }; });
+    handMode = handGrab(holding, now);
+  }
+
+  function loadScript(src) {
+    return new Promise(function (ok, fail) {
+      var s = document.createElement('script'); s.src = src; s.crossOrigin = 'anonymous';
+      s.onload = ok; s.onerror = function () { fail(new Error('load')); }; document.head.appendChild(s);
+    });
+  }
+  function say(text) { note.textContent = text; note.hidden = !text; }
+
+  async function startCamera() {
+    startBtn.disabled = true; say('');
+    setChip('search', 'Asking for the camera');
+    var stream;
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nocam');
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 540 } } });
+    } catch (e) {
+      startBtn.disabled = false; setChip('off', 'Camera blocked');
+      say('The camera is blocked on this page. Inside the Claude app that is expected: open this page at its own web address and tap Allow. Until then, drag with a finger to spin.');
+      return;
+    }
+    video.srcObject = stream;
+    try { await video.play(); } catch (e) {}
+    camOn = true; startBtn.hidden = true;
+    setChip('search', 'Loading hand tracking');
+    try {
+      await loadScript(MP_BASE + 'hands.js');
+      tracker = new window.Hands({ locateFile: function (f) { return MP_BASE + f; } });
+      tracker.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+      tracker.onResults(onResults);
+      await tracker.initialize();
+    } catch (e) {
+      tracker = null; setChip('off', 'Tracking failed to load');
+      say('The camera works, but hand tracking could not load. Check the internet connection and reload the page.');
+      return;
+    }
+    trackLoop();
+  }
+  async function trackLoop() {
+    if (tracker && !busy && video.readyState >= 2 && !document.hidden) {
+      busy = true;
+      try { await tracker.send({ image: video }); } catch (e) {}
+      busy = false;
+    }
+    requestAnimationFrame(trackLoop);
+  }
+  startBtn.addEventListener('click', startCamera);
+
+  /* ---------- HUD ---------- */
+  var chipState = '';
+  function setChip(state, text) {
+    if (chipState === state + text) return; chipState = state + text;
+    chip.dataset.state = state; chipText.textContent = text;
+  }
+  document.querySelectorAll('.seg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      shape = b.dataset.shape;
+      document.querySelectorAll('.seg button').forEach(function (o) { o.setAttribute('aria-pressed', String(o === b)); });
+    });
+  });
+
+  /* ---------- drawing ---------- */
+  function drawObject(holding) {
+    var segs = SHAPES[shape], cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.27 * zoom, cam = 3.4;
+    var groups = [[], [], [], []]; // back, front, back accent, front accent
+    for (var i = 0; i < segs.length; i++) {
+      var a = segs[i][0], b = segs[i][1];
+      var az = R[6]*a[0] + R[7]*a[1] + R[8]*a[2], bz = R[6]*b[0] + R[7]*b[1] + R[8]*b[2];
+      var fa = cam / (cam - az), fb = cam / (cam - bz);
+      groups[(az + bz > 0 ? 1 : 0) + (segs[i][2] ? 2 : 0)].push(
+        cx + (R[0]*a[0] + R[1]*a[1] + R[2]*a[2]) * fa * S, cy - (R[3]*a[0] + R[4]*a[1] + R[5]*a[2]) * fa * S,
+        cx + (R[0]*b[0] + R[1]*b[1] + R[2]*b[2]) * fb * S, cy - (R[3]*b[0] + R[4]*b[1] + R[5]*b[2]) * fb * S);
+    }
+    var main = holding ? GRAB : HOLO;
+    var style = [[main, 0.22, 1, 0], [main, 0.95, 1.6, 12], [GRAB, 0.3, 1.2, 0], [GRAB, 1, 2, 12]];
+    [0, 2, 1, 3].forEach(function (g) {
+      var p = groups[g]; if (!p.length) return;
+      ctx.beginPath();
+      for (var k = 0; k < p.length; k += 4) { ctx.moveTo(p[k], p[k+1]); ctx.lineTo(p[k+2], p[k+3]); }
+      ctx.strokeStyle = 'rgba(' + style[g][0] + ',' + style[g][1] + ')';
+      ctx.lineWidth = style[g][2]; ctx.shadowBlur = style[g][3]; ctx.shadowColor = 'rgba(' + style[g][0] + ',0.9)';
+      ctx.stroke();
+    });
+    ctx.shadowBlur = 0;
+  }
+
+  function drawHands() {
+    var r = videoRect();
+    hands.forEach(function (h) {
+      var col = h.pinching ? GRAB : HOLO, pts = h.lm.map(function (p) { return toScreen(p, r); });
+      ctx.beginPath();
+      CONN.forEach(function (c) { ctx.moveTo(pts[c[0]].x, pts[c[0]].y); ctx.lineTo(pts[c[1]].x, pts[c[1]].y); });
+      ctx.strokeStyle = 'rgba(' + col + ',0.75)'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = 'rgba(' + col + ',0.95)';
+      pts.forEach(function (p, i) { ctx.beginPath(); ctx.arc(p.x, p.y, (i === 4 || i === 8) ? 5 : 3, 0, 6.2832); ctx.fill(); });
+      // pinch ring: closes in as thumb and finger come together
+      var rad = h.pinching ? 14 : Math.max(16, Math.min(60, h.ratio * 46));
+      ctx.beginPath(); ctx.arc(h.px, h.py, rad, 0, 6.2832);
+      ctx.strokeStyle = 'rgba(' + col + ',' + (h.pinching ? 1 : 0.5) + ')'; ctx.lineWidth = h.pinching ? 3 : 1.5; ctx.stroke();
+      if (h.pinching) { // tether from the hand to the object
+        ctx.beginPath(); ctx.moveTo(h.px, h.py); ctx.lineTo(W / 2, H / 2);
+        ctx.setLineDash([4, 8]); ctx.strokeStyle = 'rgba(' + GRAB + ',0.45)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+      }
+    });
+  }
+
+  var lastFrame = performance.now(), hudTick = 0;
+  function frame(now) {
+    var dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
+    if (camOn && now - lastResultAt > 600 && hands.length) { hands = []; handMode = handGrab([], now); } // tracking went quiet
+    held = handMode !== 'none' || touchMode !== 'none';
+
+    if (!held) { // coast: a throw slows down into the idle drift
+      R = mul(rotX(vel.y * dt), mul(rotY(vel.x * dt), R));
+      var damp = Math.exp(-dt * 1.1);
+      vel.x = IDLE + (vel.x - IDLE) * damp; vel.y *= damp;
+    }
+    R = tidy(R);
+
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = '#050b14'; ctx.fillRect(0, 0, W, H);
+    if (camOn && video.readyState >= 2) {
+      var r = videoRect();
+      ctx.save(); ctx.globalAlpha = 0.32; ctx.translate(W, 0); ctx.scale(-1, 1);
+      ctx.drawImage(video, r.x, r.y, r.w, r.h); ctx.restore();
+      ctx.fillStyle = 'rgba(5, 16, 30, 0.35)'; ctx.fillRect(0, 0, W, H);
+    }
+    drawObject(held);
+    if (camOn) drawHands();
+
+    if (camOn && tracker) {
+      if (handMode === 'zoom') setChip('grab', 'Two hands: zoom and roll');
+      else if (handMode === 'spin') setChip('grab', 'Holding: move to spin');
+      else if (hands.length) setChip('found', hands.length === 2 ? 'Two hands found: pinch to grab' : 'Hand found: pinch to grab');
+      else setChip('search', 'Show your hand to the camera');
+    }
+    if (now - hudTick > 120) {
+      hudTick = now;
+      el('rYaw').textContent = Math.round(Math.atan2(R[2], R[8]) * 57.2958) + '°';
+      el('rPitch').textContent = Math.round(Math.asin(Math.max(-1, Math.min(1, -R[5]))) * 57.2958) + '°';
+      el('rZoom').textContent = Math.round(zoom * 100) + '%';
+      el('rHands').textContent = String(hands.length);
+      el('rFps').textContent = (camOn && now - lastResultAt < 1000 ? Math.round(trackFps) : 0) + ' fps';
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  window.__holo = { onResults: onResults, state: function () { return { R: R, zoom: zoom, mode: handMode, hands: hands.length }; } };
+})();
+</script>
+</body>
+</html>
