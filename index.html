@@ -125,7 +125,40 @@
   }
   #note[hidden] { display: none; }
 
+  /* instrument styling: square panels with corner brackets */
+  .panel, #note { border-radius: 2px; position: relative; background: linear-gradient(160deg, rgba(14, 34, 56, 0.78), rgba(6, 15, 28, 0.78)); }
+  .panel::before, .panel::after { content: ""; position: absolute; width: 14px; height: 14px; border: 2px solid var(--holo); pointer-events: none; }
+  .panel::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+  .panel::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+  .panel h2 { color: var(--holo); display: flex; align-items: center; gap: 8px; }
+  .panel h2::before { content: ""; width: 14px; height: 2px; background: var(--holo); box-shadow: 0 0 8px var(--holo); }
+  h1 { text-shadow: 0 0 18px rgba(111, 214, 255, 0.45); }
+  .chip, .seg, #start, .ghost, .filebtn { border-radius: 3px; }
+  .seg button[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--holo); }
+
+  summary { list-style: none; cursor: pointer; pointer-events: auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--holo); font-size: 16px; line-height: 1; }
+  details[open] > summary::after { content: "\2212"; }
+  summary h2 { margin: 0; } details[open] > summary { margin-bottom: 6px; }
+  summary:focus-visible { outline: 2px solid var(--grab); outline-offset: 4px; }
+
+  .assist { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; max-width: 420px; }
+  .wave { display: flex; gap: 3px; align-items: center; height: 34px; padding: 0 2px; flex: none; }
+  .wave i { width: 3px; height: 6px; background: var(--muted); border-radius: 2px; }
+  .assist[data-state="on"] .wave i, .assist[data-state="listening"] .wave i { background: var(--holo); animation: wave 1.6s ease-in-out infinite; }
+  .assist[data-state="speaking"] .wave i { background: var(--grab); box-shadow: 0 0 8px var(--grab); animation: wave 0.45s ease-in-out infinite; }
+  .wave i:nth-child(2) { animation-delay: -0.2s !important; } .wave i:nth-child(3) { animation-delay: -0.4s !important; }
+  .wave i:nth-child(4) { animation-delay: -0.1s !important; } .wave i:nth-child(5) { animation-delay: -0.3s !important; }
+  @keyframes wave { 0%, 100% { height: 6px; } 50% { height: 30px; } }
+  .assist-name { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.14em; font-size: 13px; color: var(--holo); }
+  .assist-name span { color: var(--muted); font-weight: 500; letter-spacing: 0.06em; margin-left: 8px; }
+  .log { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+  .log li { color: var(--muted); } .log li:last-child { color: var(--text); }
+  .log b { font-weight: 500; color: var(--holo); margin-right: 6px; } .log li.you b { color: var(--grab); }
+
   @media (max-width: 640px) {
+    .log li:not(:last-child) { display: none; }
     .hud { padding: 16px; }
     h1 { font-size: 17px; }
     .panel { max-width: none; flex: 0 0 auto; padding: 10px 12px; }
@@ -135,7 +168,7 @@
     body[data-shape="image"] #gesturePanel { display: none; }
     .ghost, #start { font-size: 14px; padding: 10px 16px; }
   }
-  @media (prefers-reduced-motion: reduce) { .chip .dot { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .chip .dot, .wave i { animation: none !important; } }
 </style>
 </head>
 <body data-shape="globe">
@@ -147,31 +180,38 @@
     <div>
       <h1>Hand Spin Hologram</h1>
       <p class="sub">Camera hand tracking, 21 points per hand</p>
+      <div class="assist" id="assist" data-state="off">
+        <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <div>
+          <div class="assist-name">ORBIT<span id="assistState">assistant off</span></div>
+          <ol class="log" id="log" aria-live="polite"><li><b>Orbit</b>Tap Assistant to switch me on.</li></ol>
+        </div>
+      </div>
     </div>
     <div class="chips">
       <div class="chip" id="chip" data-state="off"><span class="dot"></span><span id="chipText">Camera off</span></div>
-      <div class="chip small" id="vchip" data-state="off"><span class="dot"></span><span id="vchipText">Voice off</span></div>
     </div>
   </div>
 
   <div id="note" role="status" hidden></div>
 
   <div class="row bottom">
-    <div class="panel" id="gesturePanel">
-      <h2>Gestures</h2>
+    <details class="panel" id="gesturePanel" open>
+      <summary><h2>Gestures and voice</h2></summary>
       <ul class="gestures">
         <li><b>Pinch</b> thumb and index finger, then move: spin it</li>
         <li><b>Let go</b> while moving: throw it</li>
         <li><b>Pinch with both hands</b>: pull apart to zoom, twist to roll</li>
         <li><b>No camera</b>: drag with a finger or mouse</li>
-        <li><b>Voice</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter</li>
+        <li><b>Say</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter, status, time, help, quiet</li>
       </ul>
-    </div>
+    </details>
 
     <div class="controls">
       <div class="btnrow">
         <button id="start" type="button">Start camera</button>
-        <button id="voice" class="ghost" type="button" aria-pressed="false">Voice: off</button>
+        <button id="voice" class="ghost" type="button" aria-pressed="false">Assistant: off</button>
+        <button id="sound" class="ghost" type="button" aria-pressed="true">Sound: on</button>
       </div>
       <div class="seg" role="group" aria-label="Shape">
         <button type="button" id="shape-globe" data-shape="globe" aria-pressed="true">Globe</button>
@@ -409,13 +449,13 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nocam');
       stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 540 } } });
     } catch (e) {
-      startBtn.disabled = false; setChip('off', 'Camera blocked');
+      startBtn.disabled = false; setChip('off', 'Camera blocked'); SFX.error(); log('Orbit', 'Camera blocked.');
       say('The camera is blocked on this page. Inside the Claude app that is expected: open this page at its own web address and tap Allow. Until then, drag with a finger to spin.');
       return;
     }
     video.srcObject = stream;
     try { await video.play(); } catch (e) {}
-    camOn = true; startBtn.hidden = true;
+    camOn = true; startBtn.hidden = true; speak('Camera online. Loading hand tracking.', false);
     setChip('search', 'Loading hand tracking');
     try {
       await loadScript(MP_BASE + 'hands.js');
@@ -424,7 +464,7 @@
       tracker.onResults(onResults);
       await tracker.initialize();
     } catch (e) {
-      tracker = null; setChip('off', 'Tracking failed to load');
+      tracker = null; setChip('off', 'Tracking failed to load'); SFX.error();
       say('The camera works, but hand tracking could not load. Check the internet connection and reload the page.');
       return;
     }
@@ -447,6 +487,7 @@
     chip.dataset.state = state; chipText.textContent = text;
   }
   function setShape(name) {
+    if (name !== shape) SFX.shape();
     shape = name; document.body.dataset.shape = name;
     document.querySelectorAll('.seg button').forEach(function (o) { o.setAttribute('aria-pressed', String(o.dataset.shape === name)); });
   }
@@ -529,15 +570,15 @@
     var w = Math.max(2, Math.round((img.naturalWidth || img.width) * k)), h = Math.max(2, Math.round((img.naturalHeight || img.height) * k));
     srcCanvas = newCanvas(w, h); srcCanvas.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, w, h);
     brightnessDepth(); buildModel(); setShape('image');
-    imgStatus('Quick version shown. Loading the AI model…');
+    imgStatus('Quick version shown. Loading the AI model…'); speak('Reading the image.', false);
     var timeout = new Promise(function (_, no) { setTimeout(function () { no(new Error('timeout')); }, 180000); });
     Promise.race([aiDepth(), timeout]).then(function (cv) {
       if (job !== imgJob) return;
       depthCanvas = cv; buildModel();
-      imgStatus('Built by the on-device AI depth model. Use Depth and Detail to adjust it.');
+      imgStatus('Built by the on-device AI depth model. Use Depth and Detail to adjust it.'); SFX.online(); speak('Model ready, built from depth.', false);
     }).catch(function () {
       if (job !== imgJob) return;
-      imgStatus('The AI model could not load here, so this version uses brightness: lighter areas come forward.');
+      imgStatus('The AI model could not load here, so this version uses brightness: lighter areas come forward.'); speak('The depth model is unavailable. Using brightness instead.', false);
     });
   }
   el('imgFile').addEventListener('change', function (e) {
@@ -549,10 +590,79 @@
   });
   ['depthAmt', 'detail', 'flip'].forEach(function (id) { el(id).addEventListener('input', buildModel); });
   exampleImage(); buildModel();
+  if (window.innerWidth <= 640) el('gesturePanel').removeAttribute('open'); // keep the small-screen view clear
 
-  /* ---------- voice control ---------- */
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var rec = null, voiceOn = false, seen = {}, heardTimer = 0;
+  /* ---------- micro sounds: short synthesised blips, no audio files ---------- */
+  var actx = null, soundOn = true;
+  function wakeAudio() {
+    var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    try { if (!actx) actx = new AC(); if (actx.state === 'suspended') actx.resume(); } catch (err) {}
+  }
+  document.addEventListener('pointerdown', wakeAudio, true);
+  function blip(f0, f1, dur, type, vol, delay) {
+    if (!soundOn || !actx || actx.state !== 'running') return;
+    try {
+      var t = actx.currentTime + (delay || 0), o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.03);
+    } catch (err) {}
+  }
+  var SFX = {
+    tick:    function () { blip(1500, 1200, 0.04, 'square', 0.025); },
+    grab:    function () { blip(420, 900, 0.09, 'triangle', 0.09); },
+    release: function () { blip(720, 300, 0.12, 'triangle', 0.07); },
+    heard:   function () { blip(900, 900, 0.05, 'sine', 0.06); blip(1350, 1350, 0.07, 'sine', 0.06, 0.07); },
+    shape:   function () { blip(300, 1300, 0.18, 'sawtooth', 0.025); blip(640, 640, 0.12, 'sine', 0.05, 0.13); },
+    found:   function () { blip(660, 990, 0.14, 'sine', 0.06); },
+    lost:    function () { blip(420, 220, 0.16, 'sine', 0.05); },
+    online:  function () { blip(440, 440, 0.08, 'sine', 0.06); blip(660, 660, 0.08, 'sine', 0.06, 0.09); blip(990, 990, 0.14, 'sine', 0.06, 0.18); },
+    error:   function () { blip(170, 120, 0.25, 'square', 0.04); }
+  };
+  el('sound').addEventListener('click', function () {
+    soundOn = !soundOn; el('sound').setAttribute('aria-pressed', String(soundOn)); el('sound').textContent = soundOn ? 'Sound: on' : 'Sound: off';
+  });
+  document.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('button, .filebtn')) SFX.tick(); });
+
+  /* ---------- assistant: speaks, listens for command words, and reports what it notices ---------- */
+  var NAME = 'Orbit';
+  var synth = window.speechSynthesis || null, SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var assistantOn = false, listening = false, talking = false, muted = false, quietUntil = 0;
+  var rec = null, seen = {}, logLines = [], lastSpoke = 0, lastUserAct = performance.now(), tips = 0;
+  function refreshAssist() {
+    var st = !assistantOn ? 'off' : talking ? 'speaking' : listening ? 'listening' : 'on';
+    el('assist').dataset.state = st;
+    el('assistState').textContent = !assistantOn ? 'assistant off' : talking ? 'speaking' : listening ? 'listening' : muted ? 'on, voice muted' : 'on, not listening';
+  }
+  function log(who, text) {
+    logLines.push({ who: who, text: text }); if (logLines.length > 3) logLines.shift();
+    var ol = el('log'); ol.textContent = '';
+    logLines.forEach(function (l) {
+      var li = document.createElement('li'), b = document.createElement('b');
+      if (l.who === 'You') li.className = 'you';
+      b.textContent = l.who; li.appendChild(b); li.appendChild(document.createTextNode(l.text)); ol.appendChild(li);
+    });
+  }
+  function pickVoice() {
+    var vs = synth ? synth.getVoices() : [], want = ['en-GB', 'en-US', 'en'];
+    for (var w = 0; w < want.length; w++) for (var i = 0; i < vs.length; i++) if ((vs[i].lang || '').replace('_', '-').indexOf(want[w]) === 0) return vs[i];
+    return null;
+  }
+  // interrupt = true for answers to the user; false for remarks, which are skipped while already speaking
+  function speak(text, interrupt) {
+    log(NAME, text);
+    if (!assistantOn || muted || !synth) return;
+    try {
+      if (synth.speaking || talking) { if (!interrupt) return; synth.cancel(); }
+      var u = new SpeechSynthesisUtterance(text), v = pickVoice();
+      if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'en-US';
+      u.rate = 1.05; u.pitch = 0.85;
+      u.onstart = function () { talking = true; refreshAssist(); };
+      u.onend = u.onerror = function () { talking = false; quietUntil = performance.now() + 700; refreshAssist(); };
+      lastSpoke = performance.now(); synth.speak(u);
+    } catch (err) {}
+  }
+
   var WORDS = {
     stop: 'stop', freeze: 'stop', halt: 'stop', pause: 'stop',
     spin: 'spin', go: 'spin', resume: 'spin', start: 'spin', rotate: 'spin', play: 'spin',
@@ -562,59 +672,91 @@
     globe: 'globe', sphere: 'globe', earth: 'globe', ball: 'globe',
     ring: 'ring', donut: 'ring', doughnut: 'ring', cube: 'cube', box: 'cube', square: 'cube',
     image: 'image', picture: 'image', photo: 'image', model: 'image',
-    deeper: 'deeper', deep: 'deeper', flatter: 'flatter', flat: 'flatter'
+    deeper: 'deeper', deep: 'deeper', flatter: 'flatter', flat: 'flatter',
+    hello: 'hello', hi: 'hello', hey: 'hello', help: 'help', commands: 'help',
+    time: 'time', date: 'date', today: 'date', thanks: 'thanks', thank: 'thanks',
+    status: 'status', report: 'status', name: 'name', quiet: 'quiet', mute: 'quiet', silence: 'quiet', speak: 'unquiet', unmute: 'unquiet'
   };
+  var SHAPE_NAMES = { globe: 'Globe', ring: 'Ring', cube: 'Cube', image: 'Image model' };
   function nudgeDepth(by) { var s = el('depthAmt'); s.value = Math.max(0, Math.min(100, +s.value + by)); buildModel(); }
-  function command(c) {
-    if (c === 'stop') { spinning = false; vel.x = vel.y = 0; }
-    else if (c === 'spin') { spinning = true; }
-    else if (c === 'bigger') setZoom(zoom * 1.3);
-    else if (c === 'smaller') setZoom(zoom / 1.3);
-    else if (c === 'faster') { spinning = true; rate = Math.min(8, rate * 1.8); }
-    else if (c === 'slower') { rate = Math.max(0.2, rate / 1.8); }
-    else if (c === 'reset') { R = mul(rotX(0.35), rotY(-0.5)); zoom = 1; rate = 1; vel.x = vel.y = 0; }
-    else if (c === 'deeper') nudgeDepth(15);
-    else if (c === 'flatter') nudgeDepth(-15);
-    else setShape(c);
-    setVoiceChip('heard', 'Heard: ' + c);
-    clearTimeout(heardTimer); heardTimer = setTimeout(function () { if (voiceOn) setVoiceChip('on', 'Listening'); }, 1800);
+  function command(c, word) {
+    lastUserAct = performance.now(); SFX.heard(); log('You', word || c);
+    var say2;
+    if (c === 'stop') { spinning = false; vel.x = vel.y = 0; say2 = 'Holding position.'; }
+    else if (c === 'spin') { spinning = true; say2 = 'Rotation resumed.'; }
+    else if (c === 'bigger') { setZoom(zoom * 1.3); say2 = zoom >= 2.6 ? 'That is the maximum size.' : 'Enlarging.'; }
+    else if (c === 'smaller') { setZoom(zoom / 1.3); say2 = zoom <= 0.4 ? 'That is the minimum size.' : 'Reducing.'; }
+    else if (c === 'faster') { spinning = true; rate = Math.min(8, rate * 1.8); say2 = 'Speeding up.'; }
+    else if (c === 'slower') { rate = Math.max(0.2, rate / 1.8); say2 = 'Slowing down.'; }
+    else if (c === 'reset') { R = mul(rotX(0.35), rotY(-0.5)); zoom = 1; rate = 1; vel.x = vel.y = 0; say2 = 'Back to the starting view.'; }
+    else if (c === 'deeper') { nudgeDepth(15); say2 = 'More depth.'; }
+    else if (c === 'flatter') { nudgeDepth(-15); say2 = 'Less depth.'; }
+    else if (c === 'hello') say2 = 'Hello. Ready when you are.';
+    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, a shape name, status, or time.';
+    else if (c === 'time') say2 = 'It is ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.';
+    else if (c === 'date') say2 = 'Today is ' + new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
+    else if (c === 'thanks') say2 = 'Any time.';
+    else if (c === 'name') say2 = 'I am Orbit, the assistant for this hologram.';
+    else if (c === 'status') say2 = SHAPE_NAMES[shape] + ' at ' + Math.round(zoom * 100) + ' percent. ' +
+      (spinning ? 'Rotating. ' : 'Holding still. ') + (!camOn ? 'Camera is off.' : hands.length ? hands.length + (hands.length === 1 ? ' hand' : ' hands') + ' tracked.' : 'No hand in view.');
+    else if (c === 'quiet') { say2 = 'Voice muted. Say speak to bring me back.'; speak(say2, true); muted = true; refreshAssist(); return; }
+    else if (c === 'unquiet') { muted = false; say2 = 'Voice restored.'; }
+    else { setShape(c); say2 = SHAPE_NAMES[c] + ' loaded.'; }
+    speak(say2, true); refreshAssist();
   }
   function hearWord(w, prev) {
     var c = WORDS[w];
     if (prev === 'zoom' && w === 'in') c = 'bigger';
     if (prev === 'zoom' && w === 'out') c = 'smaller';
-    if (c) command(c);
+    if (c) command(c, prev === 'zoom' ? 'zoom ' + w : w);
     return !!c;
   }
-  function setVoiceChip(state, text) { el('vchip').dataset.state = state; el('vchipText').textContent = text; }
-  function setVoice(on) {
-    voiceOn = on;
-    el('voice').setAttribute('aria-pressed', String(on)); el('voice').textContent = on ? 'Voice: on' : 'Voice: off';
-    setVoiceChip(on ? 'on' : 'off', on ? 'Listening' : 'Voice off');
-  }
-  function startVoice() {
-    if (!SR) { say('Voice control is not available in this browser. On iPad and iPhone it needs Safari with Dictation turned on in Settings.'); return; }
-    say('');
+  function startListening() {
+    if (!SR) return false;
     rec = new SR(); rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
-    rec.onstart = function () { seen = {}; };
+    rec.onstart = function () { seen = {}; listening = true; refreshAssist(); };
     rec.onresult = function (e) {
+      var deaf = talking || performance.now() < quietUntil;   // do not react to my own voice
       for (var i = e.resultIndex; i < e.results.length; i++) {
         var words = e.results[i][0].transcript.toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean);
+        if (deaf) { seen[i] = words.length; continue; }
         for (var j = seen[i] || 0; j < words.length; j++) if (hearWord(words[j], words[j - 1])) seen[i] = j + 1;
       }
     };
     rec.onerror = function (e) {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        setVoice(false);
-        say('The microphone is blocked on this page. Inside the Claude app that is expected: open this page at its own web address and tap Allow.');
+        rec.onend = null; listening = false; refreshAssist(); SFX.error();
+        say('The microphone is blocked on this page, so the assistant cannot hear you. Inside the Claude app that is expected: open this page at its own web address and tap Allow.');
       }
     };
-    rec.onend = function () { if (voiceOn) setTimeout(function () { try { rec.start(); } catch (err) {} }, 300); };
-    try { rec.start(); setVoice(true); } catch (err) { setVoice(false); }
+    rec.onend = function () { listening = false; refreshAssist(); if (assistantOn) setTimeout(function () { try { rec.start(); } catch (err) {} }, 300); };
+    try { rec.start(); return true; } catch (err) { return false; }
   }
-  el('voice').addEventListener('click', function () {
-    if (voiceOn) { setVoice(false); try { rec.stop(); } catch (err) {} } else startVoice();
-  });
+  function setAssistant(on) {
+    assistantOn = on; tips = 0;
+    el('voice').setAttribute('aria-pressed', String(on)); el('voice').textContent = on ? 'Assistant: on' : 'Assistant: off';
+    if (on) {
+      muted = false; say(''); SFX.online();
+      var h = new Date().getHours(), hi = h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.';
+      var canHear = startListening();
+      speak(hi + ' Orbit online. ' + (camOn ? 'Show me your hand, or tell me what to do.' : 'Tap start camera so I can see your hand.') +
+            (canHear ? '' : ' I can talk here, but this browser will not let me listen.'), true);
+    } else {
+      try { if (rec) { rec.onend = null; rec.stop(); } } catch (err) {}
+      try { if (synth) synth.cancel(); } catch (err) {}
+      listening = talking = false; log(NAME, 'Assistant off.');
+    }
+    refreshAssist();
+  }
+  el('voice').addEventListener('click', function () { setAssistant(!assistantOn); });
+  setInterval(function () { // an occasional remark when nothing has happened for a while
+    var now = performance.now();
+    if (!assistantOn || muted || talking || tips >= 4 || now - lastSpoke < 40000 || now - lastUserAct < 40000 || document.hidden) return;
+    var lines = !camOn ? ['The camera is off. Tap start camera so I can see your hand.']
+      : !hands.length ? ['I cannot see a hand. Hold it up about an arm\'s length from the camera.']
+      : ['Pinch with both hands and pull apart to zoom.', 'Try saying bigger, or name a shape.', 'Open the image tab to turn a photo into a model.'];
+    speak(lines[tips % lines.length], false); tips++;
+  }, 15000);
 
   /* ---------- drawing ---------- */
   function drawObject(holding) {
@@ -639,6 +781,52 @@
       ctx.stroke();
     });
     ctx.shadowBlur = 0;
+  }
+
+  function drawBackdrop(now) {
+    ctx.beginPath();
+    var g = 48, ox = (W / 2) % g, oy = (H / 2) % g, x, y;
+    for (x = ox; x < W; x += g) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (y = oy; y < H; y += g) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.strokeStyle = 'rgba(' + HOLO + ',0.045)'; ctx.lineWidth = 1; ctx.stroke();
+    if (!reduceMotion) { // slow scan line
+      var sy = (now / 14) % (H + 120) - 60, grad = ctx.createLinearGradient(0, sy - 60, 0, sy);
+      grad.addColorStop(0, 'rgba(' + HOLO + ',0)'); grad.addColorStop(1, 'rgba(' + HOLO + ',0.07)');
+      ctx.fillStyle = grad; ctx.fillRect(0, sy - 60, W, 60);
+    }
+    var m = 8, L = 22; ctx.beginPath(); // screen corner brackets
+    [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]].forEach(function (c) {
+      ctx.moveTo(c[0] + L * c[2], c[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(c[0], c[1] + L * c[3]);
+    });
+    ctx.strokeStyle = 'rgba(' + HOLO + ',0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  // Dial around the object: tick ring turns with yaw, inner dashes with pitch, outer arc shows zoom.
+  function drawDial(holding) {
+    var cx = W / 2, cy = H / 2, col = holding ? GRAB : HOLO, lim = Math.min(W, H) * 0.47;
+    var r = Math.min(lim, Math.min(W, H) * 0.27 * zoom * 1.62);
+    var yaw = Math.atan2(R[2], R[8]), pitch = Math.asin(Math.max(-1, Math.min(1, -R[5]))), i, a;
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(' + col + ',0.22)';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.stroke();
+    ctx.beginPath();
+    for (i = 0; i < 72; i++) {
+      a = yaw + i / 72 * 6.2832; var len = i % 18 === 0 ? 14 : i % 6 === 0 ? 9 : 4;
+      ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.lineTo(cx + Math.cos(a) * (r + len), cy + Math.sin(a) * (r + len));
+    }
+    ctx.strokeStyle = 'rgba(' + col + ',0.5)'; ctx.stroke();
+    ctx.beginPath(); // yaw pointer: the tick that started at the top
+    a = yaw - 1.5708; ctx.moveTo(cx + Math.cos(a) * (r + 18), cy + Math.sin(a) * (r + 18)); ctx.lineTo(cx + Math.cos(a) * (r - 8), cy + Math.sin(a) * (r - 8));
+    ctx.strokeStyle = 'rgba(' + GRAB + ',0.9)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.setLineDash([18, 10]); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(' + col + ',0.35)';
+    ctx.beginPath(); ctx.arc(cx, cy, r - 10, -pitch * 2 + 0.4, -pitch * 2 + 2.2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, r - 10, -pitch * 2 + 3.54, -pitch * 2 + 5.34); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(' + col + ',0.75)'; ctx.shadowBlur = 10; ctx.shadowColor = 'rgba(' + col + ',0.9)';
+    ctx.beginPath(); ctx.arc(cx, cy, r + 22, -1.5708, -1.5708 + (zoom - 0.4) / 2.2 * 6.2832); ctx.stroke(); ctx.shadowBlur = 0;
+    ctx.font = '11px "IBM Plex Mono", ui-monospace, Menlo, monospace'; ctx.fillStyle = 'rgba(' + col + ',0.85)'; ctx.textAlign = 'center';
+    if (r + 40 < H / 2) {
+      ctx.fillText('YAW ' + Math.round(yaw * 57.2958) + '°   PITCH ' + Math.round(pitch * 57.2958) + '°', cx, cy - r - 32);
+      ctx.fillText('ZOOM ' + Math.round(zoom * 100) + '%', cx, cy + r + 42);
+    }
   }
 
   function drawModel() {
@@ -678,10 +866,21 @@
   }
 
   var lastFrame = performance.now(), hudTick = 0;
+  var wasHeld = false, handSeen = false, lastHandAt = 0, lastFoundLine = 0, firstGrab = true;
   function frame(now) {
     var dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
     if (camOn && now - lastResultAt > 600 && hands.length) { hands = []; handMode = handGrab([], now); } // tracking went quiet
     held = handMode !== 'none' || touchMode !== 'none';
+    if (held && !wasHeld) {
+      SFX.grab(); lastUserAct = now;
+      if (firstGrab && handMode !== 'none') { firstGrab = false; speak('You have control.', false); }
+    }
+    if (!held && wasHeld) SFX.release();
+    wasHeld = held;
+    if (hands.length) {
+      lastHandAt = now;
+      if (!handSeen) { handSeen = true; SFX.found(); if (now - lastFoundLine > 30000 || !lastFoundLine) { lastFoundLine = now; speak('Hand detected. Pinch to grab.', false); } }
+    } else if (handSeen && now - lastHandAt > 900) { handSeen = false; SFX.lost(); }
 
     if (!held) { // coast: a throw slows down into the idle drift
       R = mul(rotX(vel.y * dt), mul(rotY(vel.x * dt), R));
@@ -698,6 +897,7 @@
       ctx.drawImage(video, r.x, r.y, r.w, r.h); ctx.restore();
       ctx.fillStyle = 'rgba(5, 16, 30, 0.35)'; ctx.fillRect(0, 0, W, H);
     }
+    drawBackdrop(now); drawDial(held);
     if (shape === 'image') drawModel(); else drawObject(held);
     if (camOn) drawHands();
 
@@ -719,7 +919,7 @@
   }
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, spinning: function () { return spinning; }, state: function () { return { R: R, zoom: zoom, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, spinning: function () { return spinning; }, assistant: setAssistant, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
