@@ -106,6 +106,10 @@
   body[data-shape="image"] #imagePanel { display: block; }
   body[data-shape="image"] #readoutPanel, body[data-shape="build"] #readoutPanel { display: none; }
   #buildPanel { display: none; pointer-events: auto; width: 340px; max-height: 68vh; overflow-y: auto; }
+  .holo { justify-content: center; }
+  .holo .swatch { width: 22px; height: 22px; }
+  .swatch[aria-pressed="true"] { outline: 2px solid #fff; outline-offset: 2px; }
+  .swatch:focus-visible { outline: 2px solid var(--grab); outline-offset: 2px; }
   .swatch { width: 26px; height: 26px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.35); padding: 0; }
   .parts button[aria-pressed="true"] { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
   body[data-shape="build"] #buildPanel { display: grid; gap: 8px; }
@@ -146,6 +150,7 @@
   .chip, .seg, #start, .ghost, .filebtn { border-radius: 3px; }
   .seg button[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--holo); }
 
+  #gesturePanel { max-height: 44vh; overflow-y: auto; pointer-events: auto; }
   summary { list-style: none; cursor: pointer; pointer-events: auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   summary::-webkit-details-marker { display: none; }
   summary::after { content: "+"; color: var(--holo); font-size: 16px; line-height: 1; }
@@ -242,11 +247,13 @@
       <ul class="gestures">
         <li><b>Pinch</b> thumb and index finger, then move: spin it</li>
         <li><b>Let go</b> while moving: throw it</li>
-        <li><b>Pinch with both hands</b>: pull apart to zoom, twist to roll</li>
+        <li><b>Pinch with both hands</b>: pull apart to zoom, twist to roll, move together to carry it</li>
+        <li><b>Close your fist</b> and move: carry it around; let go while moving to throw it</li>
         <li><b>No camera</b>: drag with a finger or mouse</li>
         <li><b>Say</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter, closer, further, status, time, help, quiet</li>
         <li><b>Move it</b>: left, right, up, down, center, corner, or "top left", "bottom right"</li>
         <li><b>Build</b>: "add cube", "add sphere", ring, pyramid, cylinder, cone; then next, remove, clear</li>
+        <li><b>Colour</b>: say red, blue, green, purple, pink, orange, yellow, teal, white, grey or cyan; "paint red" recolours a whole design</li>
         <li><b>Design</b>: city, tower, bridge, arena, house, robot, alien, character; "again" for a new version</li>
         <li><b>Say "Orbit"</b> then anything: ask the AI, or ask it to change the hologram</li>
       </ul>
@@ -265,6 +272,7 @@
         <button type="button" id="shape-image" data-shape="image" aria-pressed="false">Image</button>
         <button type="button" id="shape-build" data-shape="build" aria-pressed="false">Build</button>
       </div>
+      <div class="wraprow holo" id="holoSwatches" role="group" aria-label="Hologram colour"></div>
     </div>
 
     <div class="panel" id="imagePanel">
@@ -303,6 +311,7 @@
       <ol class="parts" id="parts"></ol>
       <div class="label">Colour of the selected part</div>
       <div class="wraprow" id="swatches"></div>
+      <div class="wraprow"><button class="mini" type="button" id="paintAll">Paint all parts this colour</button></div>
       <div class="label">Move the selected part</div>
       <div class="wraprow" id="nudgeRow">
         <button class="mini" type="button" data-nudge="-1,0,0">Left</button>
@@ -351,7 +360,7 @@
 (function () {
   'use strict';
   var MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/';
-  var HOLO = '111, 214, 255', GRAB = '255, 179, 71';
+  var HOLO = '111, 214, 255', GRAB = '255, 179, 71', holoName = 'cyan';
   var CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
               [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
@@ -653,6 +662,16 @@
       return out;
     }
   };
+  function setHolo(name) { // colour of the hologram, dial, hand skeleton and interface accents
+    if (!COLORS[name]) return false;
+    holoName = name; HOLO = COLORS[name];
+    GRAB = /^(orange|yellow|red|pink)$/.test(name) ? '255, 255, 255' : '255, 179, 71'; // keep the holding colour distinct
+    var st = document.documentElement.style;
+    st.setProperty('--holo', 'rgb(' + HOLO + ')'); st.setProperty('--grab', 'rgb(' + GRAB + ')'); st.setProperty('--line', 'rgba(' + HOLO + ', 0.24)');
+    document.querySelectorAll('#holoSwatches .swatch').forEach(function (b) { b.setAttribute('aria-pressed', String(b.title === name)); });
+    return true;
+  }
+  function paintAll(name) { if (!COLORS[name]) return; parts.forEach(function (q) { q.color = name; }); rebuildScene(); }
   var GEN_NAMES = { city: 'City', tower: 'Tower', bridge: 'Bridge', dome: 'Arena', house: 'House', robot: 'Robot', alien: 'Alien', figure: 'Figure' };
   function generate(kind, animate) {
     if (kind === 'again') kind = lastKind;
@@ -678,7 +697,12 @@
     b.setAttribute('aria-label', name); b.title = name;
     b.addEventListener('click', function () { if (parts[sel]) { selShown = true; parts[sel].color = name; rebuildScene(); } });
     document.getElementById('swatches').appendChild(b);
+    var h = document.createElement('button'); h.type = 'button'; h.className = 'swatch'; h.style.background = 'rgb(' + COLORS[name] + ')';
+    h.setAttribute('aria-label', 'Hologram colour ' + name); h.title = name; h.setAttribute('aria-pressed', String(name === holoName));
+    h.addEventListener('click', function () { setHolo(name); });
+    document.getElementById('holoSwatches').appendChild(h);
   });
+  document.getElementById('paintAll').addEventListener('click', function () { if (parts[sel]) paintAll(parts[sel].color); });
   var shape = 'globe';
 
   /* ---------- object state ---------- */
@@ -686,7 +710,27 @@
   var zoom = 1;
   var HOME_DIST = 3.4, dist = HOME_DIST, distTarget = HOME_DIST; // how far the object sits behind the screen; glides to its target
   var pan = { x: 0, y: 0 }, panTarget = { x: 0, y: 0 }, cornerTurn = 0; // position on screen, as a fraction of its width and height
-  function panTo(x, y) { panTarget.x = Math.max(-0.36, Math.min(0.36, x)); panTarget.y = Math.max(-0.32, Math.min(0.32, y)); }
+  var panVel = { x: 0, y: 0 }, panGoal = false, carrying = false, PAN_X = 0.42, PAN_Y = 0.38; // carried by hand it has momentum; voice moves glide to a goal
+  function panTo(x, y) { panTarget.x = Math.max(-0.36, Math.min(0.36, x)); panTarget.y = Math.max(-0.32, Math.min(0.32, y)); panGoal = true; panVel.x = panVel.y = 0; }
+  function carryBy(dx, dy, dt) { // dx, dy in pixels: the object follows the hand
+    panGoal = false;
+    pan.x = Math.max(-PAN_X, Math.min(PAN_X, pan.x + dx / W)); pan.y = Math.max(-PAN_Y, Math.min(PAN_Y, pan.y + dy / H));
+    if (dt > 0) { panVel.x += (dx / W / dt - panVel.x) * 0.45; panVel.y += (dy / H / dt - panVel.y) * 0.45; }
+  }
+  function panStep(dt) {
+    if (panGoal) {
+      pan.x += (panTarget.x - pan.x) * Math.min(1, dt * 5); pan.y += (panTarget.y - pan.y) * Math.min(1, dt * 5);
+      if (Math.abs(panTarget.x - pan.x) + Math.abs(panTarget.y - pan.y) < 0.002) panGoal = false;
+      return;
+    }
+    if (!carrying) { // thrown: it keeps going, slows down, and bounces off the screen edges
+      pan.x += panVel.x * dt; pan.y += panVel.y * dt;
+      var slow = Math.exp(-dt * 2.2); panVel.x *= slow; panVel.y *= slow;
+      if (Math.abs(pan.x) > PAN_X) { pan.x = PAN_X * Math.sign(pan.x); if (Math.abs(panVel.x) > 0.12) SFX.clunk(); panVel.x *= -0.45; }
+      if (Math.abs(pan.y) > PAN_Y) { pan.y = PAN_Y * Math.sign(pan.y); if (Math.abs(panVel.y) > 0.12) SFX.clunk(); panVel.y *= -0.45; }
+    }
+    panTarget.x = pan.x; panTarget.y = pan.y;
+  }
   function midX() { return W / 2 + pan.x * W; }
   function midY() { return H / 2 + pan.y * H; }
   function moveDist(k) { distTarget = Math.max(2.2, Math.min(12, distTarget * k)); }
@@ -716,17 +760,25 @@
       if (points.length === 0) { mode = 'none'; ids = ''; return 'none'; }
       var key = points.map(function (p) { return p.id; }).sort().join(',');
       if (points.length === 1) {
-        var p = points[0];
-        if (mode !== 'spin' || key !== ids) { mode = 'spin'; ids = key; last = { x: p.x, y: p.y }; t0 = now; vel.x = vel.y = 0; return 'spin'; }
-        spinBy(p.x - last.x, p.y - last.y, (now - t0) / 1000);
-        last = { x: p.x, y: p.y }; t0 = now; return 'spin';
+        var p = points[0], want = p.fist ? 'move' : 'spin';   // closed hand carries it, pinch spins it
+        if (mode !== want || key !== ids) {
+          mode = want; ids = key; last = { x: p.x, y: p.y }; t0 = now;
+          if (want === 'spin') vel.x = vel.y = 0; else { panVel.x = panVel.y = 0; panGoal = false; }
+          return want;
+        }
+        if (want === 'spin') spinBy(p.x - last.x, p.y - last.y, (now - t0) / 1000); else carryBy(p.x - last.x, p.y - last.y, (now - t0) / 1000);
+        last = { x: p.x, y: p.y }; t0 = now; return want;
       }
-      var a = points[0], b = points[1];
+      var a = points[0], b = points[1], mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       var d = Math.hypot(b.x - a.x, b.y - a.y) || 1, ang = Math.atan2(b.y - a.y, b.x - a.x);
-      if (mode !== 'zoom' || key !== ids) { mode = 'zoom'; ids = key; d0 = d; z0 = zoom; a0 = ang; vel.x = vel.y = 0; return 'zoom'; }
+      if (mode !== 'zoom' || key !== ids) {
+        mode = 'zoom'; ids = key; d0 = d; z0 = zoom; a0 = ang; last = { x: mx, y: my }; t0 = now;
+        vel.x = vel.y = 0; panVel.x = panVel.y = 0; panGoal = false; return 'zoom';
+      }
       setZoom(z0 * d / d0);
       var da = ang - a0; if (da > Math.PI) da -= Math.PI * 2; if (da < -Math.PI) da += Math.PI * 2;
       R = mul(rotZ(-da), R); a0 = ang;
+      carryBy(mx - last.x, my - last.y, (now - t0) / 1000); last = { x: mx, y: my }; t0 = now; // both hands also carry it
       return 'zoom';
     };
   }
@@ -735,7 +787,7 @@
   var pointers = {}, touchGrab = makeGrabber(), touchMode = 'none';
   function pointerList() { return Object.keys(pointers).map(function (k) { return pointers[k]; }); }
   canvas.addEventListener('pointerdown', function (e) {
-    pointers[e.pointerId] = { id: 'p' + e.pointerId, x: e.clientX, y: e.clientY };
+    pointers[e.pointerId] = { id: 'p' + e.pointerId, x: e.clientX, y: e.clientY, fist: !!e.shiftKey };
     try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
     touchMode = touchGrab(pointerList(), performance.now()); canvas.classList.add('dragging');
   });
@@ -786,13 +838,26 @@
       var h = best || { id: 'h' + (nextHandId++), pinching: false, px: cx, py: cy };
       used[h.id] = true;
       h.px += (cx - h.px) * 0.6; h.py += (cy - h.py) * 0.6;        // light smoothing against jitter
-      h.pinching = h.pinching ? ratio < 0.55 : ratio < 0.33;       // easier to keep a pinch than to start one
+      // A finger counts as curled when its tip is nearer the wrist than its middle joint.
+      var curled = 0;
+      [[8, 6], [12, 10], [16, 14], [20, 18]].forEach(function (pr) {
+        var tip = toScreen(lm[pr[0]], r), mid = toScreen(lm[pr[1]], r);
+        if (Math.hypot(tip.x - w.x, tip.y - w.y) < Math.hypot(mid.x - w.x, mid.y - w.y)) curled++;
+      });
+      // The grip is decided when it starts and kept until the hand opens, so it cannot flip between spin and carry mid-move.
+      if (!h.grip) {
+        h.fistFrames = curled === 4 ? (h.fistFrames || 0) + 1 : 0;
+        if (h.fistFrames >= 2) h.grip = 'fist'; else if (curled < 4 && ratio < 0.33) h.grip = 'pinch';
+        h.openFrames = 0;
+      } else if (h.grip === 'pinch') { if (ratio >= 0.55) h.grip = null; }
+      else { h.openFrames = curled >= 3 ? 0 : (h.openFrames || 0) + 1; if (h.openFrames >= 2) { h.grip = null; h.fistFrames = 0; } }
+      h.pinching = h.grip === 'pinch'; h.fist = h.grip === 'fist';
       h.lm = lm; h.ratio = ratio;
       next.push(h);
     }
     hands = next;
-    var holding = hands.filter(function (h) { return h.pinching; }).slice(0, 2)
-      .map(function (h) { return { id: h.id, x: h.px, y: h.py }; });
+    var holding = hands.filter(function (h) { return h.grip; }).slice(0, 2)
+      .map(function (h) { return { id: h.id, x: h.px, y: h.py, fist: h.fist }; });
     handMode = handGrab(holding, now);
   }
 
@@ -1113,6 +1178,8 @@
       (spinning ? 'Rotating. ' : 'Holding still. ') + (!camOn ? 'Camera is off.' : hands.length ? hands.length + (hands.length === 1 ? ' hand' : ' hands') + ' tracked.' : 'No hand in view.');
     else if (c === 'quiet') { say2 = 'Voice muted. Say speak to bring me back.'; speak(say2, true); muted = true; refreshAssist(); return; }
     else if (c === 'unquiet') { muted = false; say2 = 'Voice restored.'; }
+    else if (c.indexOf('color:') === 0) { setHolo(c.slice(6)); say2 = 'Colour set to ' + c.slice(6) + '.'; }
+    else if (c.indexOf('paint:') === 0) { paintAll(c.slice(6)); setShape('build'); say2 = 'Design painted ' + c.slice(6) + '.'; }
     else if (c.indexOf('gen:') === 0) {
       var kind = generate(c.slice(4)); setShape('build'); SFX.powerup();
       say2 = GEN_NAMES[kind] + ' design assembling, ' + parts.length + ' parts.';
@@ -1136,7 +1203,8 @@
   /* ---------- AI brain: questions go to the Claude API using the key saved on this device ---------- */
   var AI_URL = 'https://api.anthropic.com/v1/messages', AI_MODEL = 'claude-haiku-5-5', KEY_STORE = 'orbit_ai_key';
   var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further', 'left', 'right', 'up', 'down', 'center', 'build',
-                 'gen:city', 'gen:tower', 'gen:bridge', 'gen:dome', 'gen:house', 'gen:robot', 'gen:alien', 'gen:figure'];
+                 'gen:city', 'gen:tower', 'gen:bridge', 'gen:dome', 'gen:house', 'gen:robot', 'gen:alien', 'gen:figure']
+                .concat(Object.keys(COLORS).map(function (n) { return 'color:' + n; }));
   var aiKey = '', chat = [];
   try { aiKey = localStorage.getItem(KEY_STORE) || ''; } catch (err) {}
   function keyUI() {
@@ -1167,6 +1235,7 @@
       '"actions" is a list of zero or more of: ' + ACTIONS.join(', ') + '. ' +
       'stop and spin control rotation; closer and further move the hologram toward or away from the screen; bigger and smaller change size by about 30 percent each; faster and slower change spin speed; ' +
       'globe, ring, cube and image switch the shape (image is a 3D model made from the user\'s photo); deeper and flatter change the image model depth; reset restores the start view. ' +
+      'color:NAME (for example color:red) changes the hologram and interface colour, with NAME one of ' + Object.keys(COLORS).join(', ') + '; ' +
       'left, right, up, down and center move it around the screen; build shows the user\'s own multi-part model. ' +
       'Repeat an action to apply it more than once. Only use actions when the user asks for a change to the hologram. ' +
       'When the user asks you to make, build or design something (a building, bridge, city, vehicle, creature, character and so on), include "build": a list of up to ' + MAX_PARTS + ' parts that replaces their model. ' +
@@ -1242,6 +1311,8 @@
     if ((w === 'left' || w === 'right') && (prev === 'top' || prev === 'upper' || prev === 'bottom' || prev === 'lower')) {
       c = 'corner:' + (prev === 'top' || prev === 'upper' ? 't' : 'b') + w.charAt(0); label = prev + ' ' + w;
     }
+    var tint = w === 'gray' ? 'grey' : w;
+    if (COLORS.hasOwnProperty(tint)) { var all = prev === 'paint' || prev2 === 'paint'; c = (all ? 'paint:' : 'color:') + tint; label = (all ? 'paint ' : '') + w; }
     if (c) command(c, label);
     return !!c;
   }
@@ -1416,7 +1487,7 @@
   function drawHands() {
     var r = videoRect();
     hands.forEach(function (h) {
-      var col = h.pinching ? GRAB : HOLO, pts = h.lm.map(function (p) { return toScreen(p, r); });
+      var col = h.grip ? GRAB : HOLO, pts = h.lm.map(function (p) { return toScreen(p, r); });
       ctx.beginPath();
       CONN.forEach(function (c) { ctx.moveTo(pts[c[0]].x, pts[c[0]].y); ctx.lineTo(pts[c[1]].x, pts[c[1]].y); });
       ctx.strokeStyle = 'rgba(' + col + ',0.75)'; ctx.lineWidth = 2; ctx.stroke();
@@ -1452,12 +1523,13 @@
 
     if (!held) { // coast: a throw slows down into the idle drift
       R = mul(rotX(vel.y * dt), mul(rotY(vel.x * dt), R));
-      var damp = Math.exp(-dt * 1.1);
+      var damp = Math.exp(-dt * 1.1 / Math.sqrt(Math.max(0.5, zoom))); // a bigger object carries its spin for longer
       var I = idle(); vel.x = I + (vel.x - I) * damp; vel.y *= damp;
     }
     R = tidy(R);
     dist += (distTarget - dist) * Math.min(1, dt * 5);
-    pan.x += (panTarget.x - pan.x) * Math.min(1, dt * 5); pan.y += (panTarget.y - pan.y) * Math.min(1, dt * 5);
+    carrying = handMode === 'move' || handMode === 'zoom' || touchMode === 'move' || touchMode === 'zoom';
+    panStep(dt);
 
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.fillStyle = '#050b14'; ctx.fillRect(0, 0, W, H);
@@ -1476,11 +1548,13 @@
     if (camOn) drawHands();
 
     if (camOn && tracker) {
-      if (handMode === 'zoom') setChip('grab', 'Two hands: zoom and roll');
+      if (handMode === 'zoom') setChip('grab', 'Two hands: zoom, roll and carry');
       else if (handMode === 'spin') setChip('grab', 'Holding: move to spin');
+      else if (handMode === 'move') setChip('grab', 'Gripping: move to carry');
       else if (hands.length) setChip('found', hands.length === 2 ? 'Two hands found: pinch to grab' : 'Hand found: pinch to grab');
       else setChip('search', 'Show your hand to the camera');
     }
+    saveProgress(now);
     if (now - hudTick > 120) {
       hudTick = now;
       el('rYaw').textContent = Math.round(Math.atan2(R[2], R[8]) * 57.2958) + '°';
@@ -1492,9 +1566,40 @@
     }
     requestAnimationFrame(frame);
   }
+  /* ---------- saved progress: kept in this browser's storage, so a reload carries on where you left off ---------- */
+  var STATE_STORE = 'orbit_state', savedText = '', lastSaveCheck = 0;
+  function snapshot() {
+    return JSON.stringify({ shape: shape, zoom: +zoom.toFixed(3), dist: +distTarget.toFixed(3), pan: [+pan.x.toFixed(3), +pan.y.toFixed(3)],
+      R: R.map(function (v) { return +v.toFixed(4); }), spinning: spinning, rate: rate, color: holoName, sound: soundOn,
+      depth: el('depthAmt').value, detail: el('detail').value, flip: el('flip').checked, kind: lastKind });
+  }
+  function saveProgress(now) {
+    if (now - lastSaveCheck < 1500 || held) return; lastSaveCheck = now;
+    var t = snapshot(); if (t === savedText) return;
+    try { localStorage.setItem(STATE_STORE, t); savedText = t; } catch (err) {}
+  }
+  (function restore() {
+    var o = null; try { o = JSON.parse(localStorage.getItem(STATE_STORE) || 'null'); } catch (err) {}
+    if (!o || typeof o !== 'object') return;
+    if (COLORS.hasOwnProperty(o.color)) setHolo(o.color);
+    if (isFinite(+o.zoom)) setZoom(+o.zoom);
+    if (isFinite(+o.dist)) { distTarget = Math.max(2.2, Math.min(12, +o.dist)); dist = distTarget; }
+    if (Array.isArray(o.pan) && isFinite(+o.pan[0]) && isFinite(+o.pan[1])) { pan.x = panTarget.x = Math.max(-PAN_X, Math.min(PAN_X, +o.pan[0])); pan.y = panTarget.y = Math.max(-PAN_Y, Math.min(PAN_Y, +o.pan[1])); }
+    if (Array.isArray(o.R) && o.R.length === 9 && o.R.every(function (v) { return isFinite(+v); })) { var m = tidy(o.R.map(Number)); if (m.every(isFinite)) R = m; }
+    if (typeof o.spinning === 'boolean' && !reduceMotion) spinning = o.spinning;
+    if (isFinite(+o.rate)) rate = Math.max(0.2, Math.min(8, +o.rate));
+    if (o.sound === false) { soundOn = false; el('sound').setAttribute('aria-pressed', 'false'); el('sound').textContent = 'Sound: off'; }
+    if (isFinite(+o.depth)) el('depthAmt').value = o.depth;
+    if (isFinite(+o.detail)) el('detail').value = o.detail;
+    el('flip').checked = !!o.flip; buildModel();
+    if (GEN.hasOwnProperty(o.kind)) lastKind = o.kind;
+    if (SHAPES.hasOwnProperty(o.shape) || o.shape === 'image') { shape = o.shape; document.body.dataset.shape = shape;
+      document.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.shape === shape)); }); }
+    savedText = snapshot();
+  })();
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, generate: generate, reveal: function () { return revealN; }, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, color: function () { return holoName; }, panNow: function () { return [pan.x, pan.y, panVel.x, panVel.y]; }, generate: generate, reveal: function () { return revealN; }, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
