@@ -104,7 +104,15 @@
 
   #imagePanel { display: none; pointer-events: auto; width: 300px; }
   body[data-shape="image"] #imagePanel { display: block; }
-  body[data-shape="image"] #readoutPanel { display: none; }
+  body[data-shape="image"] #readoutPanel, body[data-shape="build"] #readoutPanel { display: none; }
+  #buildPanel { display: none; pointer-events: auto; width: 320px; }
+  body[data-shape="build"] #buildPanel { display: grid; gap: 8px; }
+  #buildPanel h2 { margin: 0; }
+  .wraprow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .parts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 84px; overflow-y: auto; }
+  .parts button { font-family: var(--font-mono); font-size: 12px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 3px; background: none; color: var(--muted); }
+  .parts button[aria-pressed="true"] { border-color: var(--grab); color: var(--grab); }
+  .label { color: var(--muted); font-size: 12px; }
   .filebtn {
     display: inline-block; cursor: pointer; padding: 8px 14px; border-radius: 999px;
     border: 1px solid var(--holo); color: var(--holo); background: rgba(111, 214, 255, 0.14);
@@ -182,7 +190,8 @@
     .row.bottom { flex-direction: column-reverse; align-items: stretch; }
     #readoutPanel { display: none; }
     #imagePanel { width: auto; }
-    body[data-shape="image"] #gesturePanel { display: none; }
+    body[data-shape="image"] #gesturePanel, body[data-shape="build"] #gesturePanel { display: none; }
+    #buildPanel, #imagePanel { width: auto; max-height: 34vh; overflow-y: auto; }
     .ghost, #start { font-size: 14px; padding: 10px 16px; }
   }
   @media (prefers-reduced-motion: reduce) { .chip .dot, .wave i { animation: none !important; } }
@@ -226,6 +235,8 @@
         <li><b>Pinch with both hands</b>: pull apart to zoom, twist to roll</li>
         <li><b>No camera</b>: drag with a finger or mouse</li>
         <li><b>Say</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter, closer, further, status, time, help, quiet</li>
+        <li><b>Move it</b>: left, right, up, down, center, corner, or "top left", "bottom right"</li>
+        <li><b>Build</b>: "add cube", "add sphere", ring, pyramid, cylinder, cone; then next, remove, clear</li>
         <li><b>Say "Orbit"</b> then anything: ask the AI, or ask it to change the hologram</li>
       </ul>
     </details>
@@ -241,6 +252,7 @@
         <button type="button" id="shape-ring" data-shape="ring" aria-pressed="false">Ring</button>
         <button type="button" id="shape-cube" data-shape="cube" aria-pressed="false">Cube</button>
         <button type="button" id="shape-image" data-shape="image" aria-pressed="false">Image</button>
+        <button type="button" id="shape-build" data-shape="build" aria-pressed="false">Build</button>
       </div>
     </div>
 
@@ -252,6 +264,35 @@
       <label class="slider" for="depthAmt">Depth <input type="range" id="depthAmt" min="0" max="100" value="45"></label>
       <label class="slider" for="detail">Detail <input type="range" id="detail" min="32" max="112" step="8" value="72"></label>
       <label class="check" for="flip"><input type="checkbox" id="flip"> Swap near and far</label>
+    </div>
+
+    <div class="panel" id="buildPanel">
+      <h2>Build a model</h2>
+      <div class="label">Add a part</div>
+      <div class="wraprow" id="addRow">
+        <button class="mini" type="button" data-add="sphere">Sphere</button>
+        <button class="mini" type="button" data-add="cube">Cube</button>
+        <button class="mini" type="button" data-add="ring">Ring</button>
+        <button class="mini" type="button" data-add="pyramid">Pyramid</button>
+        <button class="mini" type="button" data-add="cylinder">Cylinder</button>
+        <button class="mini" type="button" data-add="cone">Cone</button>
+      </div>
+      <div class="label">Parts, tap one to select it (shown in orange)</div>
+      <ol class="parts" id="parts"></ol>
+      <div class="label">Move the selected part</div>
+      <div class="wraprow" id="nudgeRow">
+        <button class="mini" type="button" data-nudge="-1,0,0">Left</button>
+        <button class="mini" type="button" data-nudge="1,0,0">Right</button>
+        <button class="mini" type="button" data-nudge="0,1,0">Up</button>
+        <button class="mini" type="button" data-nudge="0,-1,0">Down</button>
+        <button class="mini" type="button" data-nudge="0,0,1">Front</button>
+        <button class="mini" type="button" data-nudge="0,0,-1">Back</button>
+      </div>
+      <label class="slider" for="partSize">Size <input type="range" id="partSize" min="20" max="150" value="60"></label>
+      <div class="wraprow">
+        <button class="mini" type="button" id="partRemove">Remove part</button>
+        <button class="mini" type="button" id="partClear">Clear all</button>
+      </div>
     </div>
 
     <div class="panel" id="readoutPanel">
@@ -361,13 +402,119 @@
     for (var i = 0; i < 8; i++) s.push([o[i], n[i], 0]);
     return s;
   }
-  var SHAPES = { globe: buildGlobe(), ring: buildRing(), cube: buildCube() };
+  var SHAPES = { globe: buildGlobe(), ring: buildRing(), cube: buildCube(), build: [] };
+
+  /* ---------- model builder: several simple parts combined into one model ---------- */
+  var PRIMS = {
+    sphere: function () {
+      var s = [];
+      for (var k = 0; k < 4; k++) (function (lon) { circle(s, 32, 0, function (t) { return [Math.cos(t)*Math.cos(lon), Math.sin(t), Math.cos(t)*Math.sin(lon)]; }); })(k * Math.PI / 4);
+      [-45, 0, 45].forEach(function (deg) { var lat = deg * Math.PI / 180, r = Math.cos(lat), y = Math.sin(lat); circle(s, 32, 0, function (t) { return [r*Math.cos(t), y, r*Math.sin(t)]; }); });
+      return s;
+    },
+    cube: function () {
+      var s = [], h = 0.75, c = [];
+      for (var i = 0; i < 8; i++) c.push([(i&1?h:-h), (i&2?h:-h), (i&4?h:-h)]);
+      for (var a = 0; a < 8; a++) for (var b = a+1; b < 8; b++) { var d = a ^ b; if (d===1||d===2||d===4) s.push([c[a], c[b], 0]); }
+      return s;
+    },
+    ring: function () {
+      var s = [], R0 = 0.72, r = 0.26;
+      function pt(u, v) { var q = R0 + r*Math.cos(v); return [q*Math.cos(u), r*Math.sin(v), q*Math.sin(u)]; }
+      for (var i = 0; i < 14; i++) (function (u) { circle(s, 10, 0, function (v) { return pt(u, v); }); })(i / 14 * Math.PI * 2);
+      for (var j = 0; j < 5; j++) (function (v) { circle(s, 32, 0, function (u) { return pt(u, v); }); })(j / 5 * Math.PI * 2);
+      return s;
+    },
+    pyramid: function () {
+      var s = [], b = [[-0.8,-0.6,-0.8],[0.8,-0.6,-0.8],[0.8,-0.6,0.8],[-0.8,-0.6,0.8]], top = [0, 0.9, 0];
+      for (var i = 0; i < 4; i++) { s.push([b[i], b[(i+1)%4], 0]); s.push([b[i], top, 0]); }
+      return s;
+    },
+    cylinder: function () {
+      var s = [], r = 0.6, h = 0.8;
+      circle(s, 24, 0, function (t) { return [r*Math.cos(t), h, r*Math.sin(t)]; });
+      circle(s, 24, 0, function (t) { return [r*Math.cos(t), -h, r*Math.sin(t)]; });
+      for (var i = 0; i < 8; i++) { var t = i / 8 * Math.PI * 2; s.push([[r*Math.cos(t), h, r*Math.sin(t)], [r*Math.cos(t), -h, r*Math.sin(t)], 0]); }
+      return s;
+    },
+    cone: function () {
+      var s = [], r = 0.7;
+      circle(s, 24, 0, function (t) { return [r*Math.cos(t), -0.7, r*Math.sin(t)]; });
+      for (var i = 0; i < 8; i++) { var t = i / 8 * Math.PI * 2; s.push([[r*Math.cos(t), -0.7, r*Math.sin(t)], [0, 0.9, 0], 0]); }
+      return s;
+    }
+  };
+  var PRIM_NAMES = { sphere: 'Sphere', cube: 'Cube', ring: 'Ring', pyramid: 'Pyramid', cylinder: 'Cylinder', cone: 'Cone' };
+  var primCache = {}, parts = [], sel = 0, PART_STORE = 'orbit_model', MAX_PARTS = 16;
+  function clampN(v, lo, hi, d) { v = +v; return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; }
+  function cleanParts(list) { // accept only well-formed parts, whoever supplied them
+    return (Array.isArray(list) ? list : []).filter(function (q) { return q && PRIMS[q.shape]; }).slice(0, MAX_PARTS).map(function (q) {
+      return { shape: q.shape, x: clampN(q.x, -2, 2, 0), y: clampN(q.y, -2, 2, 0), z: clampN(q.z, -2, 2, 0), size: clampN(q.size, 0.2, 1.5, 0.6) };
+    });
+  }
+  function rebuildScene() {
+    var out = [];
+    if (sel >= parts.length) sel = Math.max(0, parts.length - 1);
+    parts.forEach(function (q, i) {
+      var segs = primCache[q.shape] || (primCache[q.shape] = PRIMS[q.shape]()), flag = i === sel ? 1 : 0;
+      for (var k = 0; k < segs.length; k++) {
+        var a = segs[k][0], b = segs[k][1];
+        out.push([[a[0]*q.size + q.x, a[1]*q.size + q.y, a[2]*q.size + q.z], [b[0]*q.size + q.x, b[1]*q.size + q.y, b[2]*q.size + q.z], flag]);
+      }
+    });
+    SHAPES.build = out;
+    var ol = document.getElementById('parts'); ol.textContent = '';
+    parts.forEach(function (q, i) {
+      var li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.textContent = (i + 1) + ' ' + PRIM_NAMES[q.shape]; b.setAttribute('aria-pressed', String(i === sel));
+      b.addEventListener('click', function () { sel = i; rebuildScene(); });
+      li.appendChild(b); ol.appendChild(li);
+    });
+    if (!parts.length) { var e = document.createElement('li'); e.className = 'label'; e.textContent = 'No parts yet. Add one above.'; ol.appendChild(e); }
+    if (parts[sel]) document.getElementById('partSize').value = Math.round(parts[sel].size * 100);
+    try { localStorage.setItem(PART_STORE, JSON.stringify(parts)); } catch (err) {}
+  }
+  var SPOTS = [[0,0,0],[1.1,0,0],[-1.1,0,0],[0,1.1,0],[0,-1.1,0],[1.1,1.1,0],[-1.1,1.1,0],[1.1,-1.1,0],[-1.1,-1.1,0],[0,0,1.1],[0,0,-1.1]];
+  function addPart(shapeName) {
+    if (!PRIMS[shapeName] || parts.length >= MAX_PARTS) return false;
+    var spot = null; // first spot that is not already taken
+    for (var i = 0; i < SPOTS.length && !spot; i++) {
+      var free = true;
+      for (var j = 0; j < parts.length; j++) if (Math.hypot(parts[j].x - SPOTS[i][0], parts[j].y - SPOTS[i][1], parts[j].z - SPOTS[i][2]) < 0.4) free = false;
+      if (free) spot = SPOTS[i];
+    }
+    if (!spot) spot = [Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1];
+    parts.push({ shape: shapeName, x: spot[0], y: spot[1], z: spot[2], size: 0.6 }); sel = parts.length - 1; rebuildScene(); return true;
+  }
+  function removePart() { if (!parts.length) return false; parts.splice(sel, 1); rebuildScene(); return true; }
+  function nudgePart(dx, dy, dz) {
+    var q = parts[sel]; if (!q) return;
+    q.x = clampN(q.x + dx * 0.2, -2, 2, 0); q.y = clampN(q.y + dy * 0.2, -2, 2, 0); q.z = clampN(q.z + dz * 0.2, -2, 2, 0); rebuildScene();
+  }
+  function setParts(list) { parts = cleanParts(list); sel = Math.max(0, parts.length - 1); rebuildScene(); }
+  (function () {
+    var saved = null; try { saved = JSON.parse(localStorage.getItem(PART_STORE) || 'null'); } catch (err) {}
+    // starter model so the Build tab is never empty on first open
+    parts = cleanParts(saved && saved.length ? saved : [{ shape: 'cube', x: 0, y: -0.45, z: 0, size: 0.6 }, { shape: 'sphere', x: 0, y: 0.55, z: 0, size: 0.45 }, { shape: 'ring', x: 0, y: 0.55, z: 0, size: 0.9 }]);
+    sel = parts.length - 1; rebuildScene();
+  })();
+  document.getElementById('addRow').addEventListener('click', function (e) { var b = e.target.closest('[data-add]'); if (b) addPart(b.dataset.add); });
+  document.getElementById('nudgeRow').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-nudge]'); if (!b) return; var v = b.dataset.nudge.split(',').map(Number); nudgePart(v[0], v[1], v[2]);
+  });
+  document.getElementById('partSize').addEventListener('input', function (e) { if (parts[sel]) { parts[sel].size = clampN(e.target.value / 100, 0.2, 1.5, 0.6); rebuildScene(); } });
+  document.getElementById('partRemove').addEventListener('click', removePart);
+  document.getElementById('partClear').addEventListener('click', function () { parts = []; rebuildScene(); });
   var shape = 'globe';
 
   /* ---------- object state ---------- */
   var R = mul(rotX(0.35), rotY(-0.5));
   var zoom = 1;
   var HOME_DIST = 3.4, dist = HOME_DIST, distTarget = HOME_DIST; // how far the object sits behind the screen; glides to its target
+  var pan = { x: 0, y: 0 }, panTarget = { x: 0, y: 0 }, cornerTurn = 0; // position on screen, as a fraction of its width and height
+  function panTo(x, y) { panTarget.x = Math.max(-0.36, Math.min(0.36, x)); panTarget.y = Math.max(-0.32, Math.min(0.32, y)); }
+  function midX() { return W / 2 + pan.x * W; }
+  function midY() { return H / 2 + pan.y * H; }
   function moveDist(k) { distTarget = Math.max(2.2, Math.min(12, distTarget * k)); }
   var vel = { x: 0, y: 0 };            // radians per second: x = around vertical axis, y = around horizontal axis
   var spinning = !reduceMotion, rate = 1; // slow drift when nobody is touching it; voice can stop or change it
@@ -714,13 +861,20 @@
     ring: 'ring', donut: 'ring', doughnut: 'ring', cube: 'cube', box: 'cube', square: 'cube',
     image: 'image', picture: 'image', photo: 'image', model: 'image',
     deeper: 'deeper', deep: 'deeper', flatter: 'flatter', flat: 'flatter',
+    left: 'left', right: 'right', up: 'up', down: 'down', center: 'center', centre: 'center', middle: 'center', corner: 'corner',
+    build: 'build', builder: 'build', pyramid: 'add:pyramid', cylinder: 'add:cylinder', tube: 'add:cylinder', cone: 'add:cone',
+    remove: 'remove', delete: 'remove', clear: 'clear', next: 'next',
     closer: 'closer', close: 'closer', nearer: 'closer', near: 'closer', forward: 'closer',
     further: 'further', farther: 'further', far: 'further', away: 'further', back: 'further', backward: 'further',
     hello: 'hello', hi: 'hello', hey: 'hello', help: 'help', commands: 'help',
     time: 'time', date: 'date', today: 'date', thanks: 'thanks', thank: 'thanks',
     status: 'status', report: 'status', name: 'name', quiet: 'quiet', mute: 'quiet', silence: 'quiet', speak: 'unquiet', unmute: 'unquiet'
   };
-  var SHAPE_NAMES = { globe: 'Globe', ring: 'Ring', cube: 'Cube', image: 'Image model' };
+  var SHAPE_NAMES = { globe: 'Globe', ring: 'Ring', cube: 'Cube', image: 'Image model', build: 'Your model' };
+  var MOVES = { left: [-0.16, 0], right: [0.16, 0], up: [0, -0.16], down: [0, 0.16] };
+  var CORNERS = { tl: [-0.3, -0.27, 'top left'], tr: [0.3, -0.27, 'top right'], br: [0.3, 0.27, 'bottom right'], bl: [-0.3, 0.27, 'bottom left'] };
+  var PRIM_WORDS = { sphere: 'sphere', ball: 'sphere', globe: 'sphere', cube: 'cube', box: 'cube', ring: 'ring', donut: 'ring', doughnut: 'ring',
+                     pyramid: 'pyramid', cylinder: 'cylinder', tube: 'cylinder', cone: 'cone' };
   function nudgeDepth(by) { var s = el('depthAmt'); s.value = Math.max(0, Math.min(100, +s.value + by)); buildModel(); }
   function command(c, word, silent) { // silent: the AI asked for this action, so no extra sound or reply
     if (!silent) { lastUserAct = performance.now(); SFX.heard(); log('You', word || c); }
@@ -731,13 +885,13 @@
     else if (c === 'smaller') { setZoom(zoom / 1.3); say2 = zoom <= 0.4 ? 'That is the minimum size.' : 'Reducing.'; }
     else if (c === 'faster') { spinning = true; rate = Math.min(8, rate * 1.8); say2 = 'Speeding up.'; }
     else if (c === 'slower') { rate = Math.max(0.2, rate / 1.8); say2 = 'Slowing down.'; }
-    else if (c === 'reset') { R = mul(rotX(0.35), rotY(-0.5)); zoom = 1; rate = 1; distTarget = HOME_DIST; vel.x = vel.y = 0; say2 = 'Returned to the starting view.'; }
+    else if (c === 'reset') { R = mul(rotX(0.35), rotY(-0.5)); zoom = 1; rate = 1; distTarget = HOME_DIST; panTo(0, 0); vel.x = vel.y = 0; say2 = 'Returned to the starting view.'; }
     else if (c === 'closer') { moveDist(1 / 1.35); say2 = distTarget <= 2.2 ? 'That is as near as it goes.' : 'Bringing it nearer.'; }
     else if (c === 'further') { moveDist(1.35); say2 = distTarget >= 12 ? 'That is the limit of its range.' : 'Pushing it out.'; }
     else if (c === 'deeper') { nudgeDepth(15); say2 = 'More depth.'; }
     else if (c === 'flatter') { nudgeDepth(-15); say2 = 'Less depth.'; }
     else if (c === 'hello') say2 = 'Hello. Ready when you are.';
-    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, closer, further, a shape name, status, or time. Or say Orbit, then any question.';
+    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, closer, further, left, right, corner, add cube, a shape name, status, or time. Or say Orbit, then any question.';
     else if (c === 'time') say2 = 'It is ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.';
     else if (c === 'date') say2 = 'Today is ' + new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
     else if (c === 'thanks') say2 = 'Any time.';
@@ -746,6 +900,17 @@
       (spinning ? 'Rotating. ' : 'Holding still. ') + (!camOn ? 'Camera is off.' : hands.length ? hands.length + (hands.length === 1 ? ' hand' : ' hands') + ' tracked.' : 'No hand in view.');
     else if (c === 'quiet') { say2 = 'Voice muted. Say speak to bring me back.'; speak(say2, true); muted = true; refreshAssist(); return; }
     else if (c === 'unquiet') { muted = false; say2 = 'Voice restored.'; }
+    else if (MOVES[c]) { panTo(panTarget.x + MOVES[c][0], panTarget.y + MOVES[c][1]); say2 = 'Moving ' + c + '.'; }
+    else if (c === 'center') { panTo(0, 0); say2 = 'Centred.'; }
+    else if (c === 'corner') { var order = ['tl', 'tr', 'br', 'bl'], k = order[cornerTurn++ % 4]; panTo(CORNERS[k][0], CORNERS[k][1]); say2 = 'Moved to the ' + CORNERS[k][2] + ' corner.'; }
+    else if (c.indexOf('corner:') === 0) { var cn = CORNERS[c.slice(7)]; panTo(cn[0], cn[1]); say2 = 'Moved to the ' + cn[2] + ' corner.'; }
+    else if (c.indexOf('add:') === 0) {
+      var ok = addPart(c.slice(4)); setShape('build');
+      say2 = ok ? PRIM_NAMES[c.slice(4)] + ' added. That makes ' + parts.length + (parts.length === 1 ? ' part.' : ' parts.') : 'The model is full at ' + MAX_PARTS + ' parts.';
+    }
+    else if (c === 'remove') { setShape('build'); say2 = removePart() ? 'Part removed.' : 'There is nothing to remove.'; }
+    else if (c === 'clear') { parts = []; rebuildScene(); setShape('build'); say2 = 'Model cleared.'; }
+    else if (c === 'next') { if (parts.length) { sel = (sel + 1) % parts.length; rebuildScene(); } setShape('build'); say2 = parts.length ? 'Part ' + (sel + 1) + ' selected, a ' + parts[sel].shape + '.' : 'There are no parts yet.'; }
     else { setShape(c); say2 = SHAPE_NAMES[c] + ' loaded.'; }
     if (!silent) speak(say2, true);
     refreshAssist();
@@ -753,7 +918,7 @@
 
   /* ---------- AI brain: questions go to the Claude API using the key saved on this device ---------- */
   var AI_URL = 'https://api.anthropic.com/v1/messages', AI_MODEL = 'claude-haiku-5-5', KEY_STORE = 'orbit_ai_key';
-  var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further'];
+  var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further', 'left', 'right', 'up', 'down', 'center', 'build'];
   var aiKey = '', chat = [];
   try { aiKey = localStorage.getItem(KEY_STORE) || ''; } catch (err) {}
   function keyUI() {
@@ -784,16 +949,21 @@
       '"actions" is a list of zero or more of: ' + ACTIONS.join(', ') + '. ' +
       'stop and spin control rotation; closer and further move the hologram toward or away from the screen; bigger and smaller change size by about 30 percent each; faster and slower change spin speed; ' +
       'globe, ring, cube and image switch the shape (image is a 3D model made from the user\'s photo); deeper and flatter change the image model depth; reset restores the start view. ' +
+      'left, right, up, down and center move it around the screen; build shows the user\'s own multi-part model. ' +
       'Repeat an action to apply it more than once. Only use actions when the user asks for a change to the hologram. ' +
+      'When the user asks you to make, build or design a model of something, also include "build": a list of up to ' + MAX_PARTS + ' parts that replaces their model, ' +
+      'each {"shape": one of sphere, cube, ring, pyramid, cylinder, cone, "x": .., "y": .., "z": .., "size": ..}. x is right, y is up, z is toward the viewer, each from -1.5 to 1.5; size is from 0.2 to 1.5 and a part of size 1 is about 2 units across; a ring lies flat. Parts are wireframes and cannot be rotated or coloured. ' +
+      'The current model has ' + parts.length + ' parts: ' + JSON.stringify(parts) + '. ' +
       'Current state: shape ' + shape + ', size ' + Math.round(zoom * 100) + ' percent (range 40 to 260), ' + (spinning ? 'rotating' : 'not rotating') +
       ', camera ' + (camOn ? 'on' : 'off') + ', hands in view ' + hands.length + '. Local time ' + new Date().toString() + '.';
   }
   function parseReply(text) {
-    var out = { say: '', actions: [] }, a = text.indexOf('{'), b = text.lastIndexOf('}');
+    var out = { say: '', actions: [], build: null }, a = text.indexOf('{'), b = text.lastIndexOf('}');
     if (a !== -1 && b > a) {
       try {
         var o = JSON.parse(text.slice(a, b + 1));
         if (typeof o.say === 'string') out.say = o.say;
+        if (Array.isArray(o.build) && o.build.length) out.build = o.build;
         if (Array.isArray(o.actions)) out.actions = o.actions.filter(function (x) { return ACTIONS.indexOf(x) !== -1; }).slice(0, 8);
       } catch (err) {}
     }
@@ -811,13 +981,14 @@
       var res = await fetch(AI_URL, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: AI_MODEL, max_tokens: 400, system: systemPrompt(), messages: chat })
+        body: JSON.stringify({ model: AI_MODEL, max_tokens: 900, system: systemPrompt(), messages: chat })
       });
       var data = null; try { data = await res.json(); } catch (err) {}
       if (!res.ok) throw { status: res.status, msg: data && data.error && data.error.message };
       var text = ((data && data.content) || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join(' ');
       chat.push({ role: 'assistant', content: text });
       var out = parseReply(text);
+      if (out.build) { setParts(out.build); setShape('build'); }
       out.actions.forEach(function (x) { command(x, null, true); });
       say(''); thinking = false;
       speak(out.say || 'Done.', true);
@@ -839,11 +1010,15 @@
     usedChars[p.i] = p.raw.length; seen[p.i] = p.words;
     if (p.q) askAI(p.q); else speak('Yes? Say Orbit, then your question.', true);
   }
-  function hearWord(w, prev) {
-    var c = WORDS[w];
-    if (prev === 'zoom' && w === 'in') c = 'bigger';
-    if (prev === 'zoom' && w === 'out') c = 'smaller';
-    if (c) command(c, prev === 'zoom' ? 'zoom ' + w : w);
+  function hearWord(w, prev, prev2) {
+    var c = WORDS[w], label = w, filler = prev === 'a' || prev === 'an' || prev === 'the' || prev === 'another';
+    if (prev === 'zoom' && w === 'in') { c = 'bigger'; label = 'zoom in'; }
+    if (prev === 'zoom' && w === 'out') { c = 'smaller'; label = 'zoom out'; }
+    if (PRIM_WORDS[w] && (prev === 'add' || (filler && prev2 === 'add'))) { c = 'add:' + PRIM_WORDS[w]; label = 'add ' + w; }
+    if ((w === 'left' || w === 'right') && (prev === 'top' || prev === 'upper' || prev === 'bottom' || prev === 'lower')) {
+      c = 'corner:' + (prev === 'top' || prev === 'upper' ? 't' : 'b') + w.charAt(0); label = prev + ' ' + w;
+    }
+    if (c) command(c, label);
     return !!c;
   }
   function startListening() {
@@ -860,7 +1035,7 @@
         var rest = raw.slice(usedChars[i] || 0), m = rest.search(/\borbits?\b/i);
         var wake = -1; for (var w = seen[i] || 0; w < words.length; w++) if (words[w] === 'orbit' || words[w] === 'orbits') { wake = w; break; }
         var end = wake === -1 ? words.length : wake;
-        for (var j = seen[i] || 0; j < end; j++) if (hearWord(words[j], words[j - 1])) seen[i] = j + 1;
+        for (var j = seen[i] || 0; j < end; j++) if (hearWord(words[j], words[j - 1], words[j - 2])) seen[i] = j + 1;
         if (wake !== -1 && m !== -1) {
           pendingAsk = { i: i, raw: raw, words: words.length, q: rest.slice(m).replace(/^orbits?[\s,.!?]*/i, '').trim() };
           clearTimeout(askTimer);
@@ -905,7 +1080,7 @@
 
   /* ---------- drawing ---------- */
   function drawObject(holding) {
-    var segs = SHAPES[shape], cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
+    var segs = SHAPES[shape], cx = midX(), cy = midY(), S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
     var groups = [[], [], [], []]; // back, front, back accent, front accent
     for (var i = 0; i < segs.length; i++) {
       var a = segs[i][0], b = segs[i][1];
@@ -947,7 +1122,7 @@
   }
   // Dial around the object: tick ring turns with yaw, inner dashes with pitch, outer arc shows zoom.
   function drawDial(holding) {
-    var cx = W / 2, cy = H / 2, col = holding ? GRAB : HOLO, lim = Math.min(W, H) * 0.47;
+    var cx = midX(), cy = midY(), col = holding ? GRAB : HOLO, lim = Math.min(W, H) * 0.47;
     var r = Math.min(lim, Math.min(W, H) * 0.27 * zoom * 1.62 * HOME_DIST / dist);
     var yaw = Math.atan2(R[2], R[8]), pitch = Math.asin(Math.max(-1, Math.min(1, -R[5]))), i, a;
     ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(' + col + ',0.22)';
@@ -975,7 +1150,7 @@
   }
 
   function drawModel() {
-    var m = model, n = m.n, pos = m.pos, cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
+    var m = model, n = m.n, pos = m.pos, cx = midX(), cy = midY(), S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
     for (var i = 0, q = 0; i < n; i++, q += 3) {
       var x = pos[q], y = pos[q+1], z = pos[q+2];
       var rz = R[6]*x + R[7]*y + R[8]*z, f = cam / (dist - rz);
@@ -1004,7 +1179,7 @@
       ctx.beginPath(); ctx.arc(h.px, h.py, rad, 0, 6.2832);
       ctx.strokeStyle = 'rgba(' + col + ',' + (h.pinching ? 1 : 0.5) + ')'; ctx.lineWidth = h.pinching ? 3 : 1.5; ctx.stroke();
       if (h.pinching) { // tether from the hand to the object
-        ctx.beginPath(); ctx.moveTo(h.px, h.py); ctx.lineTo(W / 2, H / 2);
+        ctx.beginPath(); ctx.moveTo(h.px, h.py); ctx.lineTo(midX(), midY());
         ctx.setLineDash([4, 8]); ctx.strokeStyle = 'rgba(' + GRAB + ',0.45)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
       }
     });
@@ -1034,6 +1209,7 @@
     }
     R = tidy(R);
     dist += (distTarget - dist) * Math.min(1, dt * 5);
+    pan.x += (panTarget.x - pan.x) * Math.min(1, dt * 5); pan.y += (panTarget.y - pan.y) * Math.min(1, dt * 5);
 
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.fillStyle = '#050b14'; ctx.fillRect(0, 0, W, H);
@@ -1066,7 +1242,7 @@
   }
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
