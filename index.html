@@ -102,7 +102,9 @@
   }
   .ghost[aria-pressed="true"] { border-color: var(--holo); color: var(--holo); background: rgba(111, 214, 255, 0.14); }
 
-  #imagePanel { display: none; pointer-events: auto; width: 300px; }
+  #imagePanel { display: none; pointer-events: auto; width: 320px; max-height: 68vh; overflow-y: auto; }
+  #imgInfo { margin: 8px 0; padding: 2px 0 2px 10px; border-left: 2px solid var(--holo); color: var(--text); font-size: 12.5px; line-height: 1.5; -webkit-user-select: text; user-select: text; }
+  #imgInfo:empty { display: none; }
   body[data-shape="image"] #imagePanel { display: block; }
   body[data-shape="image"] #readoutPanel, body[data-shape="build"] #readoutPanel { display: none; }
   #buildPanel { display: none; pointer-events: auto; width: 340px; max-height: 68vh; overflow-y: auto; }
@@ -254,6 +256,7 @@
         <li><b>Move it</b>: left, right, up, down, center, corner, or "top left", "bottom right"</li>
         <li><b>Build</b>: "add cube", "add sphere", ring, pyramid, cylinder, cone; then next, remove, clear</li>
         <li><b>Colour</b>: say red, blue, green, purple, pink, orange, yellow, teal, white, grey or cyan; "paint red" recolours a whole design</li>
+        <li><b>Image info</b>: say "explain" and the AI tells you what your image shows; "Orbit, ..." questions can be about the image too</li>
         <li><b>Style</b>: say "solid" for realistic lit 3D, or "wireframe" for glowing lines</li>
         <li><b>Design</b>: city, tower, bridge, arena, house, robot, alien, character; "again" for a new version</li>
         <li><b>Say "Orbit"</b> then anything: ask the AI, or ask it to change the hologram</li>
@@ -282,6 +285,8 @@
       <input type="file" id="imgFile" accept="image/*" class="vh">
       <label class="filebtn" for="imgFile">Choose image</label>
       <p class="hint" id="imgStatus" role="status">Example shape shown. Choose a photo and the built-in AI works out what is near and what is far.</p>
+      <button class="mini" type="button" id="explain">Explain this image</button>
+      <p id="imgInfo" role="status"></p>
       <label class="slider" for="depthAmt">Depth <input type="range" id="depthAmt" min="0" max="100" value="45"></label>
       <label class="slider" for="detail">Detail <input type="range" id="detail" min="32" max="112" step="8" value="72"></label>
       <label class="check" for="flip"><input type="checkbox" id="flip"> Swap near and far</label>
@@ -1005,6 +1010,8 @@
     var w = Math.max(2, Math.round((img.naturalWidth || img.width) * k)), h = Math.max(2, Math.round((img.naturalHeight || img.height) * k));
     srcCanvas = newCanvas(w, h); srcCanvas.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, w, h);
     brightnessDepth(); buildModel(); setShape('image');
+    hasPhoto = true; el('imgInfo').textContent = '';
+    if (aiKey) explainImage(); else el('imgInfo').textContent = 'Add an AI key and I can explain what this image shows.';
     imgStatus('Quick version shown. Loading the AI model…'); speak('Reading the image.', false);
     var timeout = new Promise(function (_, no) { setTimeout(function () { no(new Error('timeout')); }, 180000); });
     Promise.race([aiDepth(), timeout]).then(function (cv) {
@@ -1109,7 +1116,7 @@
     logLines.forEach(function (l) {
       var li = document.createElement('li'), b = document.createElement('b');
       if (l.who === 'You') li.className = 'you';
-      b.textContent = l.who; li.appendChild(b); li.appendChild(document.createTextNode(l.text)); ol.appendChild(li);
+      b.textContent = l.who; li.appendChild(b); li.appendChild(document.createTextNode(l.text.length > 150 ? l.text.slice(0, 147) + '…' : l.text)); ol.appendChild(li);
     });
   }
   function pickVoice() {
@@ -1149,6 +1156,7 @@
     dome: 'gen:dome', stadium: 'gen:dome', arena: 'gen:dome', house: 'gen:house', villa: 'gen:house', infrastructure: 'gen:infra',
     robot: 'gen:robot', android: 'gen:robot', alien: 'gen:alien', character: 'gen:character', figure: 'gen:figure', hero: 'gen:figure',
     again: 'gen:again', regenerate: 'gen:again', random: 'gen:again',
+    explain: 'explain', describe: 'explain',
     solid: 'style:solid', realistic: 'style:solid', wireframe: 'style:wire', lines: 'style:wire',
     closer: 'closer', close: 'closer', nearer: 'closer', near: 'closer', forward: 'closer',
     further: 'further', farther: 'further', far: 'further', away: 'further', back: 'further', backward: 'further',
@@ -1186,6 +1194,7 @@
       (spinning ? 'Rotating. ' : 'Holding still. ') + (!camOn ? 'Camera is off.' : hands.length ? hands.length + (hands.length === 1 ? ' hand' : ' hands') + ' tracked.' : 'No hand in view.');
     else if (c === 'quiet') { say2 = 'Voice muted. Say speak to bring me back.'; speak(say2, true); muted = true; refreshAssist(); return; }
     else if (c === 'unquiet') { muted = false; say2 = 'Voice restored.'; }
+    else if (c === 'explain') { if (!silent) { setShape('image'); explainImage(); refreshAssist(); } return; }
     else if (c.indexOf('style:') === 0) { var gotSolid = setStyle(c === 'style:solid'); say2 = gotSolid ? 'Solid surfaces on.' : 'Wireframe view.'; }
     else if (c.indexOf('color:') === 0) { setHolo(c.slice(6)); say2 = 'Colour set to ' + c.slice(6) + '.'; }
     else if (c.indexOf('paint:') === 0) { paintAll(c.slice(6)); setShape('build'); say2 = 'Design painted ' + c.slice(6) + '.'; }
@@ -1256,6 +1265,7 @@
       'Use plenty of parts, varied colours and sensible proportions, and make parts touch where they should join. Characters must be your own original designs, never existing characters. ' +
       'The actions gen:city, gen:tower, gen:bridge, gen:dome, gen:house, gen:robot, gen:alien and gen:figure run quick built-in generators instead; use one of those only when the user asks for exactly that with no details, and never together with "build". ' +
       'The current model has ' + parts.length + ' parts' + (parts.length <= 20 ? ': ' + JSON.stringify(parts) : '') + '. ' +
+      (hasPhoto && shape === 'image' ? 'The user\'s photo from the Image tab is attached to their message; answer questions about it from what you can see, and never identify a real person from their face. ' : '') +
       'Current state: shape ' + shape + ', size ' + Math.round(zoom * 100) + ' percent (range 40 to 260), ' + (spinning ? 'rotating' : 'not rotating') +
       ', camera ' + (camOn ? 'on' : 'off') + ', hands in view ' + hands.length + '. Local time ' + new Date().toString() + '.';
   }
@@ -1273,6 +1283,51 @@
     if (!out.say && !out.actions.length) out.say = text.replace(/[{}*#`]/g, ' ').trim();
     return out;
   }
+  /* ---------- image information: the AI looks at the chosen photo and explains it ---------- */
+  var hasPhoto = false, explainJob = 0;
+  function photoBlock() { // the photo as the API expects it; it is already scaled down to at most 640 pixels
+    return { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: flatPhoto().toDataURL('image/jpeg', 0.85).split(',')[1] } };
+  }
+  function flatPhoto() { // JPEG has no transparency, so see-through areas are filled with a dark background
+    var c = newCanvas(srcCanvas.width, srcCanvas.height), x = c.getContext('2d');
+    x.fillStyle = '#101820'; x.fillRect(0, 0, c.width, c.height); x.drawImage(srcCanvas, 0, 0); return c;
+  }
+  function aiHeaders() { return { 'content-type': 'application/json', 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }; }
+  async function explainImage() {
+    var info = el('imgInfo');
+    if (!hasPhoto) { info.textContent = 'Choose an image first, then I can explain it.'; speak('Choose an image first.', true); return; }
+    if (!aiKey) { info.textContent = 'Add an AI key and I can explain what this image shows.'; speak('I need an AI key to look at the image.', true); openKey(); return; }
+    if (thinking) return;
+    var job = ++explainJob; thinking = true; refreshAssist(); info.textContent = 'Looking at the image…';
+    try {
+      var res = await fetch(AI_URL, { method: 'POST', headers: aiHeaders(), body: JSON.stringify({ model: AI_MODEL, max_tokens: 500,
+        system: 'You are Orbit, an assistant that explains images. Your answer is shown on screen and read aloud, so write plain sentences with no markdown, lists or emoji. ' +
+                'Describe people by what is visible; never identify a real person from their face.',
+        messages: [{ role: 'user', content: [photoBlock(), { type: 'text', text: 'Explain what this image represents: what it is, the main things in it, and one or two useful or interesting facts about the subject. Use four or five short sentences. If you are unsure what something is, say so.' }] }] }) });
+      var data = null; try { data = await res.json(); } catch (err) {}
+      if (!res.ok) throw { status: res.status, msg: data && data.error && data.error.message };
+      var text = ((data && data.content) || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join(' ').trim();
+      thinking = false; if (job !== explainJob) { refreshAssist(); return; }
+      info.textContent = text || 'The AI did not return a description.'; say('');
+      // remember it, so follow-up questions to Orbit make sense
+      chat.push({ role: 'user', content: 'I loaded a photo into the Image tab. Explain what it shows.' }, { role: 'assistant', content: JSON.stringify({ say: text, actions: [] }) });
+      SFX.online(); speak(text || 'I could not describe that image.', true);
+    } catch (e) {
+      thinking = false; SFX.error();
+      info.textContent = e && e.status === 401 ? 'The AI key was rejected. Check it and save it again.'
+        : e && e.status ? 'The AI service returned an error: ' + (e.msg || e.status)
+        : 'I could not reach the AI service. Check the internet connection.';
+      speak('I could not get a description of the image.', true);
+    }
+    refreshAssist();
+  }
+  el('explain').addEventListener('click', explainImage);
+  function withPhoto(messages) { // while the Image tab shows a photo, the newest question is sent together with it
+    if (!(hasPhoto && shape === 'image') || !messages.length) return messages;
+    var out = messages.slice(), last = out[out.length - 1];
+    if (last.role === 'user' && typeof last.content === 'string') out[out.length - 1] = { role: 'user', content: [photoBlock(), { type: 'text', text: last.content }] };
+    return out;
+  }
   async function askAI(q) {
     q = (q || '').trim(); if (!q || thinking) return;
     lastUserAct = performance.now(); log('You', q);
@@ -1284,7 +1339,7 @@
       var res = await fetch(AI_URL, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: AI_MODEL, max_tokens: 7000, system: systemPrompt(), messages: chat })
+        body: JSON.stringify({ model: AI_MODEL, max_tokens: 7000, system: systemPrompt(), messages: withPhoto(chat) })
       });
       var data = null; try { data = await res.json(); } catch (err) {}
       if (!res.ok) throw { status: res.status, msg: data && data.error && data.error.message };
