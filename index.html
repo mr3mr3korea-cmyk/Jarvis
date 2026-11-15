@@ -105,13 +105,15 @@
   #imagePanel { display: none; pointer-events: auto; width: 300px; }
   body[data-shape="image"] #imagePanel { display: block; }
   body[data-shape="image"] #readoutPanel, body[data-shape="build"] #readoutPanel { display: none; }
-  #buildPanel { display: none; pointer-events: auto; width: 320px; }
+  #buildPanel { display: none; pointer-events: auto; width: 340px; max-height: 68vh; overflow-y: auto; }
+  .swatch { width: 26px; height: 26px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.35); padding: 0; }
+  .parts button[aria-pressed="true"] { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
   body[data-shape="build"] #buildPanel { display: grid; gap: 8px; }
   #buildPanel h2 { margin: 0; }
   .wraprow { display: flex; flex-wrap: wrap; gap: 6px; }
   .parts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 84px; overflow-y: auto; }
   .parts button { font-family: var(--font-mono); font-size: 12px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 3px; background: none; color: var(--muted); }
-  .parts button[aria-pressed="true"] { border-color: var(--grab); color: var(--grab); }
+
   .label { color: var(--muted); font-size: 12px; }
   .filebtn {
     display: inline-block; cursor: pointer; padding: 8px 14px; border-radius: 999px;
@@ -182,6 +184,14 @@
   .modal .hint { margin: 0; } .modal input { width: 100%; }
   .modal .btnrow { justify-content: flex-start; }
 
+  @media (min-width: 641px) {
+    .row.bottom { flex-wrap: nowrap; }
+    .row.bottom > .panel { flex: 0 1 340px; min-width: 0; }
+    .controls { flex: 0 1 auto; min-width: 0; }
+  }
+  @media (max-width: 1000px) {
+    body[data-shape="image"] #gesturePanel, body[data-shape="build"] #gesturePanel { display: none; }
+  }
   @media (max-width: 640px) {
     .log li:not(:last-child) { display: none; }
     .hud { padding: 16px; }
@@ -237,6 +247,7 @@
         <li><b>Say</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter, closer, further, status, time, help, quiet</li>
         <li><b>Move it</b>: left, right, up, down, center, corner, or "top left", "bottom right"</li>
         <li><b>Build</b>: "add cube", "add sphere", ring, pyramid, cylinder, cone; then next, remove, clear</li>
+        <li><b>Design</b>: city, tower, bridge, arena, house, robot, alien, character; "again" for a new version</li>
         <li><b>Say "Orbit"</b> then anything: ask the AI, or ask it to change the hologram</li>
       </ul>
     </details>
@@ -268,6 +279,17 @@
 
     <div class="panel" id="buildPanel">
       <h2>Build a model</h2>
+      <div class="label">Generate a design (new every time)</div>
+      <div class="wraprow" id="genRow">
+        <button class="mini" type="button" data-gen="city">City</button>
+        <button class="mini" type="button" data-gen="tower">Tower</button>
+        <button class="mini" type="button" data-gen="bridge">Bridge</button>
+        <button class="mini" type="button" data-gen="dome">Arena</button>
+        <button class="mini" type="button" data-gen="house">House</button>
+        <button class="mini" type="button" data-gen="robot">Robot</button>
+        <button class="mini" type="button" data-gen="alien">Alien</button>
+        <button class="mini" type="button" data-gen="figure">Figure</button>
+      </div>
       <div class="label">Add a part</div>
       <div class="wraprow" id="addRow">
         <button class="mini" type="button" data-add="sphere">Sphere</button>
@@ -277,8 +299,10 @@
         <button class="mini" type="button" data-add="cylinder">Cylinder</button>
         <button class="mini" type="button" data-add="cone">Cone</button>
       </div>
-      <div class="label">Parts, tap one to select it (shown in orange)</div>
+      <div class="label">Parts, tap one to select it (drawn thicker)</div>
       <ol class="parts" id="parts"></ol>
+      <div class="label">Colour of the selected part</div>
+      <div class="wraprow" id="swatches"></div>
       <div class="label">Move the selected part</div>
       <div class="wraprow" id="nudgeRow">
         <button class="mini" type="button" data-nudge="-1,0,0">Left</button>
@@ -288,7 +312,7 @@
         <button class="mini" type="button" data-nudge="0,0,1">Front</button>
         <button class="mini" type="button" data-nudge="0,0,-1">Back</button>
       </div>
-      <label class="slider" for="partSize">Size <input type="range" id="partSize" min="20" max="150" value="60"></label>
+      <label class="slider" for="partSize">Size <input type="range" id="partSize" min="20" max="300" value="100"></label>
       <div class="wraprow">
         <button class="mini" type="button" id="partRemove">Remove part</button>
         <button class="mini" type="button" id="partClear">Clear all</button>
@@ -445,32 +469,56 @@
     }
   };
   var PRIM_NAMES = { sphere: 'Sphere', cube: 'Cube', ring: 'Ring', pyramid: 'Pyramid', cylinder: 'Cylinder', cone: 'Cone' };
-  var primCache = {}, parts = [], sel = 0, PART_STORE = 'orbit_model', MAX_PARTS = 16;
-  function clampN(v, lo, hi, d) { v = +v; return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; }
+  // natural size of each part shape (width, height, depth) and the height of its middle, so a part can be given real dimensions
+  var NAT = { sphere: { e: [2, 2, 2], c: 0 }, cube: { e: [1.5, 1.5, 1.5], c: 0 }, ring: { e: [1.96, 0.52, 1.96], c: 0 },
+              pyramid: { e: [1.6, 1.5, 1.6], c: 0.15 }, cylinder: { e: [1.2, 1.6, 1.2], c: 0 }, cone: { e: [1.4, 1.6, 1.4], c: 0.1 } };
+  var COLORS = { cyan: '111,214,255', blue: '90,140,255', purple: '170,120,255', pink: '255,120,200', red: '255,95,95', orange: '255,170,70',
+                 yellow: '255,225,90', green: '110,235,150', teal: '70,220,200', white: '235,245,255', grey: '150,170,190' };
+  function colorRGB(c) {
+    if (COLORS[c]) return COLORS[c];
+    var m = /^#([0-9a-f]{6})$/i.exec(c || ''); if (!m) return COLORS.cyan;
+    var n = parseInt(m[1], 16); return (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+  }
+  function cleanColor(c) { c = String(c || '').toLowerCase().trim(); if (c === 'gray') c = 'grey'; return COLORS[c] || /^#[0-9a-f]{6}$/.test(c) ? c : 'cyan'; }
+  var primCache = {}, parts = [], sel = 0, selShown = false, PART_STORE = 'orbit_model', MAX_PARTS = 60;
+  var revealN = 0, nextReveal = 0, lastKind = 'city'; // parts appear one by one after a design is generated
+  function clampN(v, lo, hi, d) { v = (v === null || v === undefined || v === '') ? NaN : +v; return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; }
   function cleanParts(list) { // accept only well-formed parts, whoever supplied them
     return (Array.isArray(list) ? list : []).filter(function (q) { return q && PRIMS[q.shape]; }).slice(0, MAX_PARTS).map(function (q) {
-      return { shape: q.shape, x: clampN(q.x, -2, 2, 0), y: clampN(q.y, -2, 2, 0), z: clampN(q.z, -2, 2, 0), size: clampN(q.size, 0.2, 1.5, 0.6) };
+      var e = NAT[q.shape].e, given = [q.w, q.h, q.d], ratio = 0.6, legacy = true;
+      for (var i = 0; i < 3; i++) if (isFinite(+given[i]) && given[i] !== null && given[i] !== undefined) { if (legacy) ratio = +given[i] / e[i]; legacy = false; }
+      if (legacy) ratio = clampN(q.size, 0.1, 4, 0.6); // older saved parts only had a size
+      return { shape: q.shape, x: clampN(q.x, -3, 3, 0), y: clampN(q.y, -3, 3, 0), z: clampN(q.z, -3, 3, 0),
+               w: clampN(q.w, 0.01, 8, e[0] * ratio), h: clampN(q.h, 0.01, 8, e[1] * ratio), d: clampN(q.d, 0.01, 8, e[2] * ratio),
+               size: legacy ? 1 : clampN(q.size, 0.1, 4, 1), rx: clampN(q.rx, -360, 360, 0), ry: clampN(q.ry, -360, 360, 0), rz: clampN(q.rz, -360, 360, 0),
+               color: cleanColor(q.color) };
     });
   }
   function rebuildScene() {
-    var out = [];
+    var out = [], D = Math.PI / 180;
     if (sel >= parts.length) sel = Math.max(0, parts.length - 1);
+    if (revealN > parts.length) revealN = parts.length;
     parts.forEach(function (q, i) {
-      var segs = primCache[q.shape] || (primCache[q.shape] = PRIMS[q.shape]()), flag = i === sel ? 1 : 0;
-      for (var k = 0; k < segs.length; k++) {
-        var a = segs[k][0], b = segs[k][1];
-        out.push([[a[0]*q.size + q.x, a[1]*q.size + q.y, a[2]*q.size + q.z], [b[0]*q.size + q.x, b[1]*q.size + q.y, b[2]*q.size + q.z], flag]);
+      var segs = primCache[q.shape] || (primCache[q.shape] = PRIMS[q.shape]()), nat = NAT[q.shape], rgb = colorRGB(q.color);
+      var M = mul(rotY(q.ry * D), mul(rotX(q.rx * D), rotZ(q.rz * D)));
+      var sx = q.w * q.size / nat.e[0], sy = q.h * q.size / nat.e[1], sz = q.d * q.size / nat.e[2];
+      function tp(pt) {
+        var x = pt[0] * sx, y = (pt[1] - nat.c) * sy, z = pt[2] * sz;
+        return [M[0]*x + M[1]*y + M[2]*z + q.x, M[3]*x + M[4]*y + M[5]*z + q.y, M[6]*x + M[7]*y + M[8]*z + q.z];
       }
+      function fitted(pt) { var v = tp(pt); return [(v[0] - fit.c[0]) * fit.k, (v[1] - fit.c[1]) * fit.k, (v[2] - fit.c[2]) * fit.k]; }
+      for (var k = 0; k < segs.length; k++) out.push([fitted(segs[k][0]), fitted(segs[k][1]), rgb, i]);
     });
     SHAPES.build = out;
     var ol = document.getElementById('parts'); ol.textContent = '';
     parts.forEach(function (q, i) {
       var li = document.createElement('li'), b = document.createElement('button');
-      b.type = 'button'; b.textContent = (i + 1) + ' ' + PRIM_NAMES[q.shape]; b.setAttribute('aria-pressed', String(i === sel));
-      b.addEventListener('click', function () { sel = i; rebuildScene(); });
+      b.type = 'button'; b.textContent = (i + 1) + ' ' + PRIM_NAMES[q.shape]; b.setAttribute('aria-pressed', String(i === sel && selShown));
+      b.style.color = 'rgb(' + colorRGB(q.color) + ')';
+      b.addEventListener('click', function () { sel = i; selShown = true; rebuildScene(); });
       li.appendChild(b); ol.appendChild(li);
     });
-    if (!parts.length) { var e = document.createElement('li'); e.className = 'label'; e.textContent = 'No parts yet. Add one above.'; ol.appendChild(e); }
+    if (!parts.length) { var e = document.createElement('li'); e.className = 'label'; e.textContent = 'No parts yet. Add one or generate a design.'; ol.appendChild(e); }
     if (parts[sel]) document.getElementById('partSize').value = Math.round(parts[sel].size * 100);
     try { localStorage.setItem(PART_STORE, JSON.stringify(parts)); } catch (err) {}
   }
@@ -484,27 +532,153 @@
       if (free) spot = SPOTS[i];
     }
     if (!spot) spot = [Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1];
-    parts.push({ shape: shapeName, x: spot[0], y: spot[1], z: spot[2], size: 0.6 }); sel = parts.length - 1; rebuildScene(); return true;
+    var e = NAT[shapeName].e;
+    parts.push({ shape: shapeName, x: spot[0], y: spot[1], z: spot[2], w: e[0] * 0.6, h: e[1] * 0.6, d: e[2] * 0.6, size: 1, rx: 0, ry: 0, rz: 0, color: 'cyan' });
+    sel = parts.length - 1; selShown = true; revealN = parts.length; rebuildScene(); return true;
   }
-  function removePart() { if (!parts.length) return false; parts.splice(sel, 1); rebuildScene(); return true; }
+  function removePart() { if (!parts.length) return false; parts.splice(sel, 1); revealN = parts.length; rebuildScene(); return true; }
   function nudgePart(dx, dy, dz) {
-    var q = parts[sel]; if (!q) return;
-    q.x = clampN(q.x + dx * 0.2, -2, 2, 0); q.y = clampN(q.y + dy * 0.2, -2, 2, 0); q.z = clampN(q.z + dz * 0.2, -2, 2, 0); rebuildScene();
+    var q = parts[sel]; if (!q) return; selShown = true;
+    q.x = clampN(q.x + dx * 0.2, -3, 3, 0); q.y = clampN(q.y + dy * 0.2, -3, 3, 0); q.z = clampN(q.z + dz * 0.2, -3, 3, 0); rebuildScene();
   }
-  function setParts(list) { parts = cleanParts(list); sel = Math.max(0, parts.length - 1); rebuildScene(); }
+  var fit = { c: [0, 0, 0], k: 1 }; // a whole design is centred and scaled to fill the dial; it stays fixed while parts are edited
+  function setParts(list, animate) {
+    parts = cleanParts(list); sel = Math.max(0, parts.length - 1); selShown = false;
+    revealN = animate ? 0 : parts.length; nextReveal = performance.now() + 150;
+    fit = { c: [0, 0, 0], k: 1 }; rebuildScene();
+    var lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9], segs = SHAPES.build, i, j, r = 0;
+    for (i = 0; i < segs.length; i++) for (j = 0; j < 2; j++) for (var a = 0; a < 3; a++) { var v = segs[i][j][a]; if (v < lo[a]) lo[a] = v; if (v > hi[a]) hi[a] = v; }
+    if (!segs.length) return;
+    var c = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+    for (i = 0; i < segs.length; i++) for (j = 0; j < 2; j++) r = Math.max(r, Math.hypot(segs[i][j][0] - c[0], segs[i][j][1] - c[1], segs[i][j][2] - c[2]));
+    fit = { c: c, k: r > 0 ? Math.min(2.5, 1.3 / r) : 1 }; rebuildScene();
+  }
+
+  /* ---------- design generators: every call makes a new, original variation ---------- */
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+  function box(x, yb, z, w, h, d, c) { return { shape: 'cube', x: x, y: yb + h / 2, z: z, w: w, h: h, d: d, color: c }; }
+  function cyl(x, yb, z, r, h, c) { return { shape: 'cylinder', x: x, y: yb + h / 2, z: z, w: r * 2, h: h, d: r * 2, color: c }; }
+  function cone(x, yb, z, r, h, c) { return { shape: 'cone', x: x, y: yb + h / 2, z: z, w: r * 2, h: h, d: r * 2, color: c }; }
+  function pyr(x, yb, z, w, h, c) { return { shape: 'pyramid', x: x, y: yb + h / 2, z: z, w: w, h: h, d: w, color: c }; }
+  function sph(x, y, z, r, c, squash) { return { shape: 'sphere', x: x, y: y, z: z, w: r * 2, h: r * 2 * (squash || 1), d: r * 2, color: c }; }
+  function hoop(x, y, z, r, c, rx) { return { shape: 'ring', x: x, y: y, z: z, w: r * 2, h: r * 0.54, d: r * 2, rx: rx || 0, color: c }; }
+  function rod(x1, y1, x2, y2, z, r, c) { // a thin cylinder between two points
+    var dx = x2 - x1, dy = y2 - y1;
+    return { shape: 'cylinder', x: (x1 + x2) / 2, y: (y1 + y2) / 2, z: z, w: r * 2, h: Math.hypot(dx, dy), d: r * 2, rz: Math.atan2(-dx, dy) * 180 / Math.PI, color: c };
+  }
+  var GEN = {
+    city: function () {
+      var G = -1.1, out = [box(0, G - 0.05, 0, 3.0, 0.05, 3.0, 'grey')], pal = ['cyan', 'blue', 'teal', 'purple', 'white'];
+      for (var ix = 0; ix < 4; ix++) for (var iz = 0; iz < 4; iz++) {
+        if (Math.random() < 0.12) continue;
+        var x = (ix - 1.5) * 0.68, z = (iz - 1.5) * 0.68, mid = 1 - (Math.abs(ix - 1.5) + Math.abs(iz - 1.5)) / 3;
+        var h = rnd(0.35, 0.9) + mid * rnd(0.6, 1.8), w = rnd(0.32, 0.5), c = pick(pal), r = Math.random();
+        out.push(box(x, G, z, w, h, w, c));
+        if (h > 1.4 && r < 0.5) out.push(cyl(x, G + h, z, 0.02, rnd(0.25, 0.5), 'red'));
+        else if (r < 0.25) out.push(pyr(x, G + h, z, w, 0.2, 'orange'));
+        else if (r < 0.45) out.push(box(x, G + h, z, w * 0.6, 0.12, w * 0.6, 'yellow'));
+      }
+      return out;
+    },
+    tower: function () {
+      var G = -1.5, y = G, w = rnd(0.9, 1.2), c1 = pick(['cyan', 'blue', 'purple', 'teal']), c2 = pick(['white', 'orange', 'pink', 'yellow']);
+      var out = [box(0, G - 0.06, 0, 2.2, 0.06, 2.2, 'grey')], tiers = 4 + Math.floor(rnd(0, 3)), round = Math.random() < 0.5;
+      for (var i = 0; i < tiers; i++) {
+        var h = rnd(0.3, 0.46); out.push(round ? cyl(0, y, 0, w / 2, h, i % 2 ? c2 : c1) : box(0, y, 0, w, h, w, i % 2 ? c2 : c1));
+        y += h; w *= rnd(0.72, 0.88);
+      }
+      out.push(hoop(0, y, 0, w * 0.6 + 0.15, c2), sph(0, y + 0.14, 0, Math.max(0.1, w * 0.4), c1), cone(0, y + 0.22, 0, 0.05, rnd(0.5, 0.85), 'red'));
+      return out;
+    },
+    bridge: function () {
+      var c = pick(['red', 'orange', 'cyan', 'pink']), out = [box(0, -1.15, 0, 3.6, 0.04, 1.6, 'blue'), box(0, -0.35, 0, 3.4, 0.08, 0.5, 'grey')];
+      [-0.9, 0.9].forEach(function (tx) {
+        [-0.22, 0.22].forEach(function (tz) { out.push(box(tx, -1.1, tz, 0.1, 2.0, 0.1, c)); });
+        out.push(box(tx, 0.76, 0, 0.1, 0.1, 0.54, c), box(tx, 0.2, 0, 0.08, 0.08, 0.54, c));
+        [-1, 1].forEach(function (side) { [0.3, 0.55, 0.8].forEach(function (k) {
+          [-0.22, 0.22].forEach(function (tz) { out.push(rod(tx, 0.86, tx + side * k, -0.3, tz, 0.012, 'white')); });
+        }); });
+      });
+      return out;
+    },
+    dome: function () {
+      var c = pick(['cyan', 'purple', 'teal', 'blue']), out = [box(0, -0.86, 0, 3.2, 0.05, 3.2, 'grey'), cyl(0, -0.8, 0, 1.1, 0.45, c),
+        sph(0, -0.35, 0, 1.05, 'white', 0.6), hoop(0, -0.35, 0, 1.15, 'orange'), hoop(0, -0.62, 0, 1.3, c), box(0, -0.8, 1.15, 0.5, 0.3, 0.3, 'yellow')];
+      for (var i = 0; i < 4; i++) {
+        var a = Math.PI / 4 + i * Math.PI / 2, x = Math.cos(a) * 1.45, z = Math.sin(a) * 1.45;
+        out.push(cyl(x, -0.8, z, 0.02, 1.1, 'grey'), sph(x, 0.34, z, 0.07, 'yellow'));
+      }
+      return out;
+    },
+    house: function () {
+      var c = pick(['cyan', 'teal', 'purple', 'orange']);
+      return [box(0, -0.86, 0, 3.2, 0.05, 2.6, 'green'), box(-0.3, -0.8, 0, 1.4, 0.6, 1.0, 'white'), box(0.2, -0.2, 0.1, 1.2, 0.5, 0.8, c),
+        box(0.2, 0.3, 0.1, 1.5, 0.05, 1.1, 'grey'), box(0.95, -0.8, 0.3, 0.5, 0.6, 0.5, 'teal'), box(0.9, -0.84, -0.8, 1.0, 0.04, 0.5, 'blue'),
+        box(-0.3, -0.8, 0.52, 0.3, 0.45, 0.04, 'yellow'), cyl(-1.25, -0.8, -0.7, 0.04, 0.5, 'orange'), sph(-1.25, -0.1, -0.7, 0.3, 'green'),
+        cyl(-1.3, -0.8, 0.75, 0.03, 0.4, 'orange'), sph(-1.3, -0.25, 0.75, 0.22, 'green')];
+    },
+    robot: function () {
+      var c1 = pick(['cyan', 'blue', 'teal', 'purple', 'green', 'orange']), c2 = pick(['white', 'yellow', 'pink', 'grey']);
+      var bw = rnd(0.7, 0.95), bh = rnd(0.75, 1.0), top = -0.68 + bh, out = [box(0, -0.82, 0, bw * 0.8, 0.14, 0.32, c2), box(0, -0.68, 0, bw, bh, 0.45, c1),
+        hoop(0, -0.68 + bh * 0.6, 0.24, 0.14, 'yellow', 90), cyl(0, top, 0, 0.08, 0.1, c2)];
+      [-1, 1].forEach(function (s) {
+        var a = rnd(8, 60) * Math.PI / 180, sx = s * (bw / 2 + 0.1), sy = top - 0.12, hx = sx + s * Math.sin(a) * 0.6, hy = sy - Math.cos(a) * 0.6;
+        out.push(box(s * bw * 0.28, -1.4, 0, 0.2, 0.58, 0.22, c2), box(s * bw * 0.28, -1.5, 0.06, 0.28, 0.1, 0.4, c1),
+                 sph(sx, sy, 0, 0.12, c2), rod(sx, sy, hx, hy, 0, 0.07, c1), sph(hx, hy, 0, 0.1, c2), sph(s * 0.13, top + 0.42, 0.27, 0.06, 'yellow'));
+      });
+      out.push(Math.random() < 0.5 ? sph(0, top + 0.4, 0, 0.32, c1) : box(0, top + 0.1, 0, 0.62, 0.5, 0.5, c1));
+      out.push(cyl(0, top + 0.62, 0, 0.015, 0.25, 'grey'), sph(0, top + 0.9, 0, 0.05, 'red'));
+      return out;
+    },
+    alien: function () {
+      var c1 = pick(['green', 'teal', 'purple', 'pink']), c2 = pick(['yellow', 'white', 'orange']), eyes = Math.random() < 0.4 ? 3 : 2;
+      var out = [hoop(0, -1.2, 0, 0.6, c2), hoop(0, -1.05, 0, 0.4, c2), cone(0, -1.1, 0, 0.45, 1.05, c1), sph(0, 0.25, 0, 0.55, c1, 0.8)];
+      for (var i = 0; i < eyes; i++) { var ex = (i - (eyes - 1) / 2) * 0.3; out.push(sph(ex, 0.3, 0.47, 0.12, 'white'), sph(ex, 0.3, 0.58, 0.05, 'purple')); }
+      [-1, 1].forEach(function (s) {
+        out.push(rod(s * 0.15, 0.62, s * 0.42, 1.1, 0, 0.015, c2), sph(s * 0.42, 1.1, 0, 0.07, c2),
+                 rod(s * 0.28, -0.4, s * 0.75, rnd(-0.3, 0.2), 0, 0.035, c1), sph(s * 0.78, 0, 0, 0.08, c2));
+      });
+      return out;
+    },
+    figure: function () {
+      var c1 = pick(['blue', 'red', 'purple', 'teal', 'green']), c2 = pick(['yellow', 'white', 'orange', 'pink']), wave = rnd(0.2, 0.75);
+      var out = [cyl(0, -0.5, 0, 0.26, 0.75, c1), hoop(0, -0.45, 0, 0.28, c2), cyl(0, 0.25, 0, 0.07, 0.08, 'white'), sph(0, 0.56, 0, 0.24, 'white'),
+        sph(-0.09, 0.6, 0.21, 0.035, c1), sph(0.09, 0.6, 0.21, 0.035, c1), hoop(0, 0.02, 0.27, 0.1, c2, 90)];
+      [-1, 1].forEach(function (s) {
+        out.push(rod(s * 0.14, -0.5, s * 0.22, -1.38, 0, 0.08, c2), box(s * 0.22, -1.48, 0.06, 0.2, 0.1, 0.36, c1), sph(s * 0.34, 0.16, 0, 0.1, c1));
+      });
+      out.push(rod(-0.34, 0.16, -0.62, -0.4, 0, 0.06, c1), sph(-0.62, -0.4, 0, 0.08, 'white'), rod(0.34, 0.16, 0.72, wave, 0, 0.06, c1), sph(0.72, wave, 0, 0.08, 'white'));
+      if (Math.random() < 0.6) out.push(cone(0, 0.74, 0, 0.2, 0.26, c2));
+      return out;
+    }
+  };
+  var GEN_NAMES = { city: 'City', tower: 'Tower', bridge: 'Bridge', dome: 'Arena', house: 'House', robot: 'Robot', alien: 'Alien', figure: 'Figure' };
+  function generate(kind, animate) {
+    if (kind === 'again') kind = lastKind;
+    if (kind === 'infra') kind = pick(['city', 'tower', 'bridge', 'dome', 'house']);
+    if (kind === 'character') kind = pick(['robot', 'alien', 'figure']);
+    if (!GEN[kind]) kind = 'city';
+    lastKind = kind; setParts(GEN[kind](), animate !== false); return kind;
+  }
   (function () {
     var saved = null; try { saved = JSON.parse(localStorage.getItem(PART_STORE) || 'null'); } catch (err) {}
-    // starter model so the Build tab is never empty on first open
-    parts = cleanParts(saved && saved.length ? saved : [{ shape: 'cube', x: 0, y: -0.45, z: 0, size: 0.6 }, { shape: 'sphere', x: 0, y: 0.55, z: 0, size: 0.45 }, { shape: 'ring', x: 0, y: 0.55, z: 0, size: 0.9 }]);
-    sel = parts.length - 1; rebuildScene();
+    if (saved && saved.length) setParts(saved, false); else generate('city', false); // a design to look at on first open
   })();
-  document.getElementById('addRow').addEventListener('click', function (e) { var b = e.target.closest('[data-add]'); if (b) addPart(b.dataset.add); });
+  document.getElementById('addRow').addEventListener('click', function (e) { var b = e.target.closest('[data-add]'); if (b) { addPart(b.dataset.add); SFX.clunk(); } });
+  document.getElementById('genRow').addEventListener('click', function (e) { var b = e.target.closest('[data-gen]'); if (b) { generate(b.dataset.gen); SFX.powerup(); } });
   document.getElementById('nudgeRow').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-nudge]'); if (!b) return; var v = b.dataset.nudge.split(',').map(Number); nudgePart(v[0], v[1], v[2]);
+    var b = e.target.closest('[data-nudge]'); if (!b) return; var v = b.dataset.nudge.split(',').map(Number); nudgePart(v[0], v[1], v[2]); SFX.servo();
   });
-  document.getElementById('partSize').addEventListener('input', function (e) { if (parts[sel]) { parts[sel].size = clampN(e.target.value / 100, 0.2, 1.5, 0.6); rebuildScene(); } });
+  document.getElementById('partSize').addEventListener('input', function (e) { if (parts[sel]) { selShown = true; parts[sel].size = clampN(e.target.value / 100, 0.1, 4, 1); rebuildScene(); } });
   document.getElementById('partRemove').addEventListener('click', removePart);
-  document.getElementById('partClear').addEventListener('click', function () { parts = []; rebuildScene(); });
+  document.getElementById('partClear').addEventListener('click', function () { parts = []; revealN = 0; fit = { c: [0, 0, 0], k: 1 }; rebuildScene(); });
+  Object.keys(COLORS).forEach(function (name) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'swatch'; b.style.background = 'rgb(' + COLORS[name] + ')';
+    b.setAttribute('aria-label', name); b.title = name;
+    b.addEventListener('click', function () { if (parts[sel]) { selShown = true; parts[sel].color = name; rebuildScene(); } });
+    document.getElementById('swatches').appendChild(b);
+  });
   var shape = 'globe';
 
   /* ---------- object state ---------- */
@@ -521,10 +695,12 @@
   function idle() { return spinning ? 0.18 * rate : 0; }
   var held = false;                    // true while a hand or finger is holding the object
 
+  var ratchetAcc = 0;
   function spinBy(dx, dy, dt) {        // dx, dy in pixels
     var k = Math.PI * 1.3 / Math.min(W, H);
     var ax = dx * k, ay = dy * k;
     R = mul(rotX(ay), mul(rotY(ax), R));
+    ratchetAcc += Math.hypot(ax, ay); if (ratchetAcc > 0.3) { ratchetAcc = 0; SFX.ratchet(); } // a click every few degrees
     if (dt > 0) {
       var mix = 0.45;
       vel.x += (ax / dt - vel.x) * mix; vel.y += (ay / dt - vel.y) * mix;
@@ -806,7 +982,40 @@
     online:  function () { blip(440, 440, 0.08, 'sine', 0.06); blip(660, 660, 0.08, 'sine', 0.06, 0.09); blip(990, 990, 0.14, 'sine', 0.06, 0.18); },
     error:   function () { blip(170, 120, 0.25, 'square', 0.04); }
   };
+  var noiseBuf = null;
+  function noise(dur, type, f0, f1, q, vol, delay) { // filtered noise: hisses, clunks and ratchets
+    if (!soundOn || !actx || actx.state !== 'running') return;
+    try {
+      if (!noiseBuf) { noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate); var d = noiseBuf.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+      var t = actx.currentTime + (delay || 0), src = actx.createBufferSource(), flt = actx.createBiquadFilter(), g = actx.createGain();
+      src.buffer = noiseBuf; src.loop = true; flt.type = type; flt.Q.value = q;
+      flt.frequency.setValueAtTime(f0, t); flt.frequency.exponentialRampToValueAtTime(f1, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.02, dur / 3)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(flt); flt.connect(g); g.connect(actx.destination); src.start(t); src.stop(t + dur + 0.03);
+    } catch (err) {}
+  }
+  SFX.servo   = function () { blip(95, 190, 0.32, 'sawtooth', 0.022); noise(0.32, 'bandpass', 900, 2200, 6, 0.03); };
+  SFX.hiss    = function () { noise(0.45, 'highpass', 5000, 1800, 0.7, 0.035); blip(70, 55, 0.3, 'sine', 0.05); };
+  SFX.clunk   = function () { noise(0.07, 'lowpass', 900, 200, 1, 0.12); blip(110, 48, 0.14, 'sine', 0.12); blip(2200, 1800, 0.02, 'square', 0.02, 0.03); };
+  SFX.ratchet = function () { noise(0.018, 'bandpass', 3200, 2600, 4, 0.06); };
+  SFX.rivet   = function (n) { blip(1700 + (n % 5) * 90, 1500, 0.025, 'square', 0.02); noise(0.03, 'bandpass', 4200, 3000, 3, 0.04); };
+  SFX.powerup = function () { blip(60, 520, 0.7, 'sawtooth', 0.03); noise(0.7, 'bandpass', 300, 3000, 2, 0.03); };
+  SFX.scan    = function () { blip(1900, 1900, 0.03, 'sine', 0.025); blip(2500, 2500, 0.03, 'sine', 0.02, 0.08); };
+  SFX.lock    = function () { SFX.clunk(); blip(520, 780, 0.12, 'triangle', 0.05, 0.1); };
+  var hum = null; // quiet reactor hum under everything while sound is on
+  function setHum(on) {
+    try {
+      if (on && !hum && actx && actx.state === 'running') {
+        var g = actx.createGain(), f = actx.createBiquadFilter(), o1 = actx.createOscillator(), o2 = actx.createOscillator();
+        o1.type = o2.type = 'sawtooth'; o1.frequency.value = 55; o2.frequency.value = 55.7; f.type = 'lowpass'; f.frequency.value = 190;
+        g.gain.setValueAtTime(0.0001, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.02, actx.currentTime + 2);
+        o1.connect(f); o2.connect(f); f.connect(g); g.connect(actx.destination); o1.start(); o2.start(); hum = { o1: o1, o2: o2 };
+      } else if (!on && hum) { hum.o1.stop(); hum.o2.stop(); hum = null; }
+    } catch (err) {}
+  }
+  document.addEventListener('pointerdown', function () { setTimeout(function () { setHum(soundOn); }, 300); }, true);
   el('sound').addEventListener('click', function () {
+    setTimeout(function () { setHum(soundOn); }, 0);
     soundOn = !soundOn; el('sound').setAttribute('aria-pressed', String(soundOn)); el('sound').textContent = soundOn ? 'Sound: on' : 'Sound: off';
   });
   document.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('button, .filebtn')) SFX.tick(); });
@@ -864,6 +1073,10 @@
     left: 'left', right: 'right', up: 'up', down: 'down', center: 'center', centre: 'center', middle: 'center', corner: 'corner',
     build: 'build', builder: 'build', pyramid: 'add:pyramid', cylinder: 'add:cylinder', tube: 'add:cylinder', cone: 'add:cone',
     remove: 'remove', delete: 'remove', clear: 'clear', next: 'next',
+    city: 'gen:city', town: 'gen:city', skyline: 'gen:city', tower: 'gen:tower', skyscraper: 'gen:tower', bridge: 'gen:bridge',
+    dome: 'gen:dome', stadium: 'gen:dome', arena: 'gen:dome', house: 'gen:house', villa: 'gen:house', infrastructure: 'gen:infra',
+    robot: 'gen:robot', android: 'gen:robot', alien: 'gen:alien', character: 'gen:character', figure: 'gen:figure', hero: 'gen:figure',
+    again: 'gen:again', regenerate: 'gen:again', random: 'gen:again',
     closer: 'closer', close: 'closer', nearer: 'closer', near: 'closer', forward: 'closer',
     further: 'further', farther: 'further', far: 'further', away: 'further', back: 'further', backward: 'further',
     hello: 'hello', hi: 'hello', hey: 'hello', help: 'help', commands: 'help',
@@ -886,12 +1099,12 @@
     else if (c === 'faster') { spinning = true; rate = Math.min(8, rate * 1.8); say2 = 'Speeding up.'; }
     else if (c === 'slower') { rate = Math.max(0.2, rate / 1.8); say2 = 'Slowing down.'; }
     else if (c === 'reset') { R = mul(rotX(0.35), rotY(-0.5)); zoom = 1; rate = 1; distTarget = HOME_DIST; panTo(0, 0); vel.x = vel.y = 0; say2 = 'Returned to the starting view.'; }
-    else if (c === 'closer') { moveDist(1 / 1.35); say2 = distTarget <= 2.2 ? 'That is as near as it goes.' : 'Bringing it nearer.'; }
-    else if (c === 'further') { moveDist(1.35); say2 = distTarget >= 12 ? 'That is the limit of its range.' : 'Pushing it out.'; }
+    else if (c === 'closer') { SFX.hiss(); moveDist(1 / 1.35); say2 = distTarget <= 2.2 ? 'That is as near as it goes.' : 'Bringing it nearer.'; }
+    else if (c === 'further') { SFX.hiss(); moveDist(1.35); say2 = distTarget >= 12 ? 'That is the limit of its range.' : 'Pushing it out.'; }
     else if (c === 'deeper') { nudgeDepth(15); say2 = 'More depth.'; }
     else if (c === 'flatter') { nudgeDepth(-15); say2 = 'Less depth.'; }
     else if (c === 'hello') say2 = 'Hello. Ready when you are.';
-    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, closer, further, left, right, corner, add cube, a shape name, status, or time. Or say Orbit, then any question.';
+    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, closer, further, left, right, corner, add cube, city, tower, bridge, robot, alien, status, or time. Or say Orbit, then any question.';
     else if (c === 'time') say2 = 'It is ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.';
     else if (c === 'date') say2 = 'Today is ' + new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
     else if (c === 'thanks') say2 = 'Any time.';
@@ -900,17 +1113,21 @@
       (spinning ? 'Rotating. ' : 'Holding still. ') + (!camOn ? 'Camera is off.' : hands.length ? hands.length + (hands.length === 1 ? ' hand' : ' hands') + ' tracked.' : 'No hand in view.');
     else if (c === 'quiet') { say2 = 'Voice muted. Say speak to bring me back.'; speak(say2, true); muted = true; refreshAssist(); return; }
     else if (c === 'unquiet') { muted = false; say2 = 'Voice restored.'; }
-    else if (MOVES[c]) { panTo(panTarget.x + MOVES[c][0], panTarget.y + MOVES[c][1]); say2 = 'Moving ' + c + '.'; }
-    else if (c === 'center') { panTo(0, 0); say2 = 'Centred.'; }
-    else if (c === 'corner') { var order = ['tl', 'tr', 'br', 'bl'], k = order[cornerTurn++ % 4]; panTo(CORNERS[k][0], CORNERS[k][1]); say2 = 'Moved to the ' + CORNERS[k][2] + ' corner.'; }
-    else if (c.indexOf('corner:') === 0) { var cn = CORNERS[c.slice(7)]; panTo(cn[0], cn[1]); say2 = 'Moved to the ' + cn[2] + ' corner.'; }
+    else if (c.indexOf('gen:') === 0) {
+      var kind = generate(c.slice(4)); setShape('build'); SFX.powerup();
+      say2 = GEN_NAMES[kind] + ' design assembling, ' + parts.length + ' parts.';
+    }
+    else if (MOVES[c]) { SFX.servo(); panTo(panTarget.x + MOVES[c][0], panTarget.y + MOVES[c][1]); say2 = 'Moving ' + c + '.'; }
+    else if (c === 'center') { SFX.servo(); panTo(0, 0); say2 = 'Centred.'; }
+    else if (c === 'corner') { SFX.servo(); var order = ['tl', 'tr', 'br', 'bl'], k = order[cornerTurn++ % 4]; panTo(CORNERS[k][0], CORNERS[k][1]); say2 = 'Moved to the ' + CORNERS[k][2] + ' corner.'; }
+    else if (c.indexOf('corner:') === 0) { SFX.servo(); var cn = CORNERS[c.slice(7)]; panTo(cn[0], cn[1]); say2 = 'Moved to the ' + cn[2] + ' corner.'; }
     else if (c.indexOf('add:') === 0) {
-      var ok = addPart(c.slice(4)); setShape('build');
+      var ok = addPart(c.slice(4)); setShape('build'); if (ok) SFX.clunk();
       say2 = ok ? PRIM_NAMES[c.slice(4)] + ' added. That makes ' + parts.length + (parts.length === 1 ? ' part.' : ' parts.') : 'The model is full at ' + MAX_PARTS + ' parts.';
     }
     else if (c === 'remove') { setShape('build'); say2 = removePart() ? 'Part removed.' : 'There is nothing to remove.'; }
-    else if (c === 'clear') { parts = []; rebuildScene(); setShape('build'); say2 = 'Model cleared.'; }
-    else if (c === 'next') { if (parts.length) { sel = (sel + 1) % parts.length; rebuildScene(); } setShape('build'); say2 = parts.length ? 'Part ' + (sel + 1) + ' selected, a ' + parts[sel].shape + '.' : 'There are no parts yet.'; }
+    else if (c === 'clear') { parts = []; revealN = 0; fit = { c: [0, 0, 0], k: 1 }; rebuildScene(); setShape('build'); say2 = 'Model cleared.'; }
+    else if (c === 'next') { if (parts.length) { sel = selShown ? (sel + 1) % parts.length : 0; selShown = true; rebuildScene(); } setShape('build'); say2 = parts.length ? 'Part ' + (sel + 1) + ' selected, a ' + parts[sel].shape + '.' : 'There are no parts yet.'; }
     else { setShape(c); say2 = SHAPE_NAMES[c] + ' loaded.'; }
     if (!silent) speak(say2, true);
     refreshAssist();
@@ -918,7 +1135,8 @@
 
   /* ---------- AI brain: questions go to the Claude API using the key saved on this device ---------- */
   var AI_URL = 'https://api.anthropic.com/v1/messages', AI_MODEL = 'claude-haiku-5-5', KEY_STORE = 'orbit_ai_key';
-  var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further', 'left', 'right', 'up', 'down', 'center', 'build'];
+  var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter', 'closer', 'further', 'left', 'right', 'up', 'down', 'center', 'build',
+                 'gen:city', 'gen:tower', 'gen:bridge', 'gen:dome', 'gen:house', 'gen:robot', 'gen:alien', 'gen:figure'];
   var aiKey = '', chat = [];
   try { aiKey = localStorage.getItem(KEY_STORE) || ''; } catch (err) {}
   function keyUI() {
@@ -951,9 +1169,14 @@
       'globe, ring, cube and image switch the shape (image is a 3D model made from the user\'s photo); deeper and flatter change the image model depth; reset restores the start view. ' +
       'left, right, up, down and center move it around the screen; build shows the user\'s own multi-part model. ' +
       'Repeat an action to apply it more than once. Only use actions when the user asks for a change to the hologram. ' +
-      'When the user asks you to make, build or design a model of something, also include "build": a list of up to ' + MAX_PARTS + ' parts that replaces their model, ' +
-      'each {"shape": one of sphere, cube, ring, pyramid, cylinder, cone, "x": .., "y": .., "z": .., "size": ..}. x is right, y is up, z is toward the viewer, each from -1.5 to 1.5; size is from 0.2 to 1.5 and a part of size 1 is about 2 units across; a ring lies flat. Parts are wireframes and cannot be rotated or coloured. ' +
-      'The current model has ' + parts.length + ' parts: ' + JSON.stringify(parts) + '. ' +
+      'When the user asks you to make, build or design something (a building, bridge, city, vehicle, creature, character and so on), include "build": a list of up to ' + MAX_PARTS + ' parts that replaces their model. ' +
+      'Each part is {"shape": one of sphere, cube, ring, pyramid, cylinder, cone, "x": .., "y": .., "z": .., "w": .., "h": .., "d": .., "rx": .., "ry": .., "rz": .., "color": ..}. ' +
+      'x, y, z is the centre of the part: x is right, y is up, z is toward the viewer. w, h, d are its full width, height and depth, so a cube with w 0.4, h 2, d 0.4 is a tall block. ' +
+      'rx, ry, rz are optional rotations in degrees. Unrotated, a cylinder and a cone stand upright, a pyramid has a square base, and a ring lies flat. ' +
+      'color is one of ' + Object.keys(COLORS).join(', ') + ', or "#rrggbb". Keep everything between -2 and 2 with the ground near y = -1.2. Parts are drawn as glowing coloured wireframes. ' +
+      'Use plenty of parts, varied colours and sensible proportions, and make parts touch where they should join. Characters must be your own original designs, never existing characters. ' +
+      'The actions gen:city, gen:tower, gen:bridge, gen:dome, gen:house, gen:robot, gen:alien and gen:figure run quick built-in generators instead; use one of those only when the user asks for exactly that with no details, and never together with "build". ' +
+      'The current model has ' + parts.length + ' parts' + (parts.length <= 20 ? ': ' + JSON.stringify(parts) : '') + '. ' +
       'Current state: shape ' + shape + ', size ' + Math.round(zoom * 100) + ' percent (range 40 to 260), ' + (spinning ? 'rotating' : 'not rotating') +
       ', camera ' + (camOn ? 'on' : 'off') + ', hands in view ' + hands.length + '. Local time ' + new Date().toString() + '.';
   }
@@ -965,6 +1188,7 @@
         if (typeof o.say === 'string') out.say = o.say;
         if (Array.isArray(o.build) && o.build.length) out.build = o.build;
         if (Array.isArray(o.actions)) out.actions = o.actions.filter(function (x) { return ACTIONS.indexOf(x) !== -1; }).slice(0, 8);
+        if (Array.isArray(o.build) && o.build.length) out.actions = out.actions.filter(function (x) { return x.indexOf('gen:') !== 0; });
       } catch (err) {}
     }
     if (!out.say && !out.actions.length) out.say = text.replace(/[{}*#`]/g, ' ').trim();
@@ -981,14 +1205,14 @@
       var res = await fetch(AI_URL, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: AI_MODEL, max_tokens: 900, system: systemPrompt(), messages: chat })
+        body: JSON.stringify({ model: AI_MODEL, max_tokens: 4000, system: systemPrompt(), messages: chat })
       });
       var data = null; try { data = await res.json(); } catch (err) {}
       if (!res.ok) throw { status: res.status, msg: data && data.error && data.error.message };
       var text = ((data && data.content) || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join(' ');
       chat.push({ role: 'assistant', content: text });
       var out = parseReply(text);
-      if (out.build) { setParts(out.build); setShape('build'); }
+      if (out.build) { setParts(out.build, true); setShape('build'); SFX.powerup(); }
       out.actions.forEach(function (x) { command(x, null, true); });
       say(''); thinking = false;
       speak(out.say || 'Done.', true);
@@ -1056,7 +1280,7 @@
     assistantOn = on; tips = 0;
     el('voice').setAttribute('aria-pressed', String(on)); el('voice').textContent = on ? 'Assistant: on' : 'Assistant: off';
     if (on) {
-      muted = false; say(''); SFX.online();
+      muted = false; say(''); SFX.powerup(); setTimeout(SFX.online, 650);
       var h = new Date().getHours(), hi = h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.';
       var canHear = startListening();
       speak(hi + ' Orbit online. ' + (camOn ? 'Show me your hand, or tell me what to do.' : 'Tap start camera so I can see your hand.') +
@@ -1081,26 +1305,50 @@
   /* ---------- drawing ---------- */
   function drawObject(holding) {
     var segs = SHAPES[shape], cx = midX(), cy = midY(), S = Math.min(W, H) * 0.27 * zoom, cam = HOME_DIST;
-    var groups = [[], [], [], []]; // back, front, back accent, front accent
+    var isBuild = shape === 'build', assembling = isBuild && revealN < parts.length, groups = {}, keys = [];
     for (var i = 0; i < segs.length; i++) {
-      var a = segs[i][0], b = segs[i][1];
+      var sg = segs[i], a = sg[0], b = sg[1], pi = sg[3];
+      if (isBuild && pi >= revealN) continue;                                  // not assembled yet
       var az = R[6]*a[0] + R[7]*a[1] + R[8]*a[2], bz = R[6]*b[0] + R[7]*b[1] + R[8]*b[2];
       var fa = cam / (dist - az), fb = cam / (dist - bz);
-      groups[(az + bz > 0 ? 1 : 0) + (segs[i][2] ? 2 : 0)].push(
-        cx + (R[0]*a[0] + R[1]*a[1] + R[2]*a[2]) * fa * S, cy - (R[3]*a[0] + R[4]*a[1] + R[5]*a[2]) * fa * S,
-        cx + (R[0]*b[0] + R[1]*b[1] + R[2]*b[2]) * fb * S, cy - (R[3]*b[0] + R[4]*b[1] + R[5]*b[2]) * fb * S);
+      if (fa <= 0 || fb <= 0) continue;
+      var col = sg[2] === 0 ? (holding ? GRAB : HOLO) : sg[2] === 1 ? GRAB : sg[2];
+      if (assembling && pi === revealN - 1) col = '255,255,255';               // the part that just locked in flashes white
+      var thick = isBuild && !assembling && selShown && pi === sel ? 1 : 0, front = az + bz > 0 ? 1 : 0;
+      var key = col + '|' + front + thick, g = groups[key];
+      if (!g) { g = groups[key] = { col: col, front: front, thick: thick, p: [] }; keys.push(key); }
+      g.p.push(cx + (R[0]*a[0] + R[1]*a[1] + R[2]*a[2]) * fa * S, cy - (R[3]*a[0] + R[4]*a[1] + R[5]*a[2]) * fa * S,
+               cx + (R[0]*b[0] + R[1]*b[1] + R[2]*b[2]) * fb * S, cy - (R[3]*b[0] + R[4]*b[1] + R[5]*b[2]) * fb * S);
     }
-    var main = holding ? GRAB : HOLO;
-    var style = [[main, 0.22, 1, 0], [main, 0.95, 1.6, 12], [GRAB, 0.3, 1.2, 0], [GRAB, 1, 2, 12]];
-    [0, 2, 1, 3].forEach(function (g) {
-      var p = groups[g]; if (!p.length) return;
+    for (var pass = 0; pass < 2; pass++) keys.forEach(function (key) {
+      var g = groups[key], p = g.p; if (g.front !== pass) return;
       ctx.beginPath();
       for (var k = 0; k < p.length; k += 4) { ctx.moveTo(p[k], p[k+1]); ctx.lineTo(p[k+2], p[k+3]); }
-      ctx.strokeStyle = 'rgba(' + style[g][0] + ',' + style[g][1] + ')';
-      ctx.lineWidth = style[g][2]; ctx.shadowBlur = style[g][3]; ctx.shadowColor = 'rgba(' + style[g][0] + ',0.9)';
+      ctx.strokeStyle = 'rgba(' + g.col + ',' + (pass ? 0.95 : 0.26) + ')';
+      ctx.lineWidth = (pass ? 1.6 : 1) + g.thick * 1.8; ctx.shadowBlur = pass ? 10 : 0; ctx.shadowColor = 'rgba(' + g.col + ',0.9)';
       ctx.stroke();
     });
     ctx.shadowBlur = 0;
+  }
+  // Projector under the object: base rings, a faint beam, and a scan bar while assembling or thinking.
+  function drawProjector(now) {
+    var cx = midX(), cy = midY(), S = Math.min(W, H) * 0.27 * zoom * HOME_DIST / dist, by = cy + S * 1.5, rx = S * 0.95, ry = rx * 0.2, i;
+    var beam = ctx.createLinearGradient(0, by, 0, cy - S * 0.4);
+    beam.addColorStop(0, 'rgba(' + HOLO + ',0.10)'); beam.addColorStop(1, 'rgba(' + HOLO + ',0)');
+    ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(cx - rx * 0.45, by); ctx.lineTo(cx + rx * 0.45, by); ctx.lineTo(cx + S * 1.25, cy - S * 0.4); ctx.lineTo(cx - S * 1.25, cy - S * 0.4); ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 1.2;
+    for (i = 0; i < 3; i++) {
+      ctx.beginPath(); ctx.ellipse(cx, by, rx * (1 - i * 0.28), ry * (1 - i * 0.28), 0, 0, 6.2832);
+      ctx.strokeStyle = 'rgba(' + HOLO + ',' + (0.5 - i * 0.12) + ')'; ctx.stroke();
+    }
+    var spin = reduceMotion ? 0 : now / 900; ctx.beginPath(); // markers running round the base
+    for (i = 0; i < 12; i++) { var a = spin + i / 12 * 6.2832; ctx.moveTo(cx + Math.cos(a) * rx, by + Math.sin(a) * ry); ctx.lineTo(cx + Math.cos(a) * rx * 1.08, by + Math.sin(a) * ry * 1.08); }
+    ctx.strokeStyle = 'rgba(' + GRAB + ',0.8)'; ctx.lineWidth = 2; ctx.stroke();
+    if ((shape === 'build' && revealN < parts.length) || thinking) {
+      var sy = cy + Math.sin(now / 260) * S * 1.2;
+      ctx.beginPath(); ctx.moveTo(cx - S * 1.35, sy); ctx.lineTo(cx + S * 1.35, sy);
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.shadowBlur = 14; ctx.shadowColor = 'rgba(' + HOLO + ',1)'; ctx.stroke(); ctx.shadowBlur = 0;
+    }
   }
 
   function drawBackdrop(now) {
@@ -1145,7 +1393,7 @@
     ctx.font = '11px "IBM Plex Mono", ui-monospace, Menlo, monospace'; ctx.fillStyle = 'rgba(' + col + ',0.85)'; ctx.textAlign = 'center';
     if (r + 40 < H / 2) {
       ctx.fillText('YAW ' + Math.round(yaw * 57.2958) + '°   PITCH ' + Math.round(pitch * 57.2958) + '°', cx, cy - r - 32);
-      ctx.fillText('ZOOM ' + Math.round(zoom * 100) + '%', cx, cy + r + 42);
+      ctx.fillText('ZOOM ' + Math.round(zoom * 100) + '%' + (shape === 'build' ? '   PARTS ' + Math.min(revealN, parts.length) + '/' + parts.length : ''), cx, cy + r + 42);
     }
   }
 
@@ -1186,7 +1434,7 @@
   }
 
   var lastFrame = performance.now(), hudTick = 0;
-  var wasHeld = false, handSeen = false, lastHandAt = 0, lastFoundLine = 0, firstGrab = true;
+  var lastScan = 0, wasHeld = false, handSeen = false, lastHandAt = 0, lastFoundLine = 0, firstGrab = true;
   function frame(now) {
     var dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
     if (camOn && now - lastResultAt > 600 && hands.length) { hands = []; handMode = handGrab([], now); } // tracking went quiet
@@ -1219,7 +1467,11 @@
       ctx.drawImage(video, r.x, r.y, r.w, r.h); ctx.restore();
       ctx.fillStyle = 'rgba(5, 16, 30, 0.35)'; ctx.fillRect(0, 0, W, H);
     }
-    drawBackdrop(now); drawDial(held);
+    if (shape === 'build' && revealN < parts.length && now >= nextReveal) { // assemble a generated design part by part
+      revealN++; nextReveal = now + 55; SFX.rivet(revealN); if (revealN >= parts.length) SFX.lock();
+    }
+    if (thinking && now - lastScan > 520) { lastScan = now; SFX.scan(); }
+    drawBackdrop(now); drawProjector(now); drawDial(held);
     if (shape === 'image') drawModel(); else drawObject(held);
     if (camOn) drawHands();
 
@@ -1242,7 +1494,7 @@
   }
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, generate: generate, reveal: function () { return revealN; }, parts: function () { return parts; }, pan: function () { return panTarget; }, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, dist: dist, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
