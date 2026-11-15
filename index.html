@@ -157,6 +157,23 @@
   .log li { color: var(--muted); } .log li:last-child { color: var(--text); }
   .log b { font-weight: 500; color: var(--holo); margin-right: 6px; } .log li.you b { color: var(--grab); }
 
+  input { -webkit-user-select: text; user-select: text; }
+  .ask { display: flex; gap: 6px; margin-top: 8px; pointer-events: auto; }
+  .ask input, .modal input {
+    flex: 1 1 auto; min-width: 0; font: inherit; color: var(--text); background: rgba(5, 14, 26, 0.8);
+    border: 1px solid var(--line); border-radius: 3px; padding: 7px 10px;
+  }
+  .ask input:focus-visible, .modal input:focus-visible { outline: 2px solid var(--holo); outline-offset: 1px; }
+  .mini { white-space: nowrap; flex: none; font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: 0.04em; padding: 7px 12px;
+          border: 1px solid var(--line); border-radius: 3px; background: var(--panel); color: var(--holo); }
+  .mini[data-set="no"] { border-color: var(--grab); color: var(--grab); }
+  .assist[data-state="thinking"] .wave i { background: var(--grab); animation: wave 0.9s ease-in-out infinite; }
+  .modal { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(2, 6, 12, 0.7); pointer-events: auto; z-index: 5; }
+  .modal[hidden] { display: none; }
+  .modal .panel { max-width: 440px; width: 100%; pointer-events: auto; display: grid; gap: 10px; }
+  .modal .hint { margin: 0; } .modal input { width: 100%; }
+  .modal .btnrow { justify-content: flex-start; }
+
   @media (max-width: 640px) {
     .log li:not(:last-child) { display: none; }
     .hud { padding: 16px; }
@@ -185,6 +202,11 @@
         <div>
           <div class="assist-name">ORBIT<span id="assistState">assistant off</span></div>
           <ol class="log" id="log" aria-live="polite"><li><b>Orbit</b>Tap Assistant to switch me on.</li></ol>
+          <form class="ask" id="askForm">
+            <input type="text" id="askText" placeholder="Ask Orbit anything" autocomplete="off" aria-label="Ask Orbit anything">
+            <button class="mini" type="submit" id="askSend">Ask</button>
+            <button class="mini" type="button" id="keyOpen" data-set="no">AI key</button>
+          </form>
         </div>
       </div>
     </div>
@@ -204,6 +226,7 @@
         <li><b>Pinch with both hands</b>: pull apart to zoom, twist to roll</li>
         <li><b>No camera</b>: drag with a finger or mouse</li>
         <li><b>Say</b>: stop, spin, bigger, smaller, faster, slower, reset, globe, ring, cube, image, deeper, flatter, status, time, help, quiet</li>
+        <li><b>Say "Orbit"</b> then anything: ask the AI, or ask it to change the hologram</li>
       </ul>
     </details>
 
@@ -241,6 +264,20 @@
         <dt>Tracking</dt><dd id="rFps">0 fps</dd>
       </dl>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="keyModal" hidden>
+  <div class="panel" role="dialog" aria-labelledby="keyTitle">
+    <h2 id="keyTitle">AI key</h2>
+    <p class="hint">Paste your Claude API key. It starts with sk-ant-. It is saved only in this browser on this device, and is sent only to Anthropic when you ask Orbit something.</p>
+    <input type="password" id="aiKey" autocomplete="off" placeholder="sk-ant-…" aria-label="Claude API key">
+    <div class="btnrow">
+      <button class="mini" type="button" id="keySave">Save key</button>
+      <button class="mini" type="button" id="keyRemove">Remove key</button>
+      <button class="mini" type="button" id="keyClose">Close</button>
+    </div>
+    <p class="hint" id="keyState" role="status">No key saved.</p>
   </div>
 </div>
 
@@ -629,10 +666,11 @@
   var synth = window.speechSynthesis || null, SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   var assistantOn = false, listening = false, talking = false, muted = false, quietUntil = 0;
   var rec = null, seen = {}, logLines = [], lastSpoke = 0, lastUserAct = performance.now(), tips = 0;
+  var thinking = false, usedChars = {}, askTimer = 0, pendingAsk = null;
   function refreshAssist() {
-    var st = !assistantOn ? 'off' : talking ? 'speaking' : listening ? 'listening' : 'on';
+    var st = thinking ? 'thinking' : !assistantOn ? 'off' : talking ? 'speaking' : listening ? 'listening' : 'on';
     el('assist').dataset.state = st;
-    el('assistState').textContent = !assistantOn ? 'assistant off' : talking ? 'speaking' : listening ? 'listening' : muted ? 'on, voice muted' : 'on, not listening';
+    el('assistState').textContent = thinking ? 'thinking' : !assistantOn ? 'assistant off' : talking ? 'speaking' : listening ? 'listening' : muted ? 'on, voice muted' : 'on, not listening';
   }
   function log(who, text) {
     logLines.push({ who: who, text: text }); if (logLines.length > 3) logLines.shift();
@@ -679,8 +717,8 @@
   };
   var SHAPE_NAMES = { globe: 'Globe', ring: 'Ring', cube: 'Cube', image: 'Image model' };
   function nudgeDepth(by) { var s = el('depthAmt'); s.value = Math.max(0, Math.min(100, +s.value + by)); buildModel(); }
-  function command(c, word) {
-    lastUserAct = performance.now(); SFX.heard(); log('You', word || c);
+  function command(c, word, silent) { // silent: the AI asked for this action, so no extra sound or reply
+    if (!silent) { lastUserAct = performance.now(); SFX.heard(); log('You', word || c); }
     var say2;
     if (c === 'stop') { spinning = false; vel.x = vel.y = 0; say2 = 'Holding position.'; }
     else if (c === 'spin') { spinning = true; say2 = 'Rotation resumed.'; }
@@ -692,7 +730,7 @@
     else if (c === 'deeper') { nudgeDepth(15); say2 = 'More depth.'; }
     else if (c === 'flatter') { nudgeDepth(-15); say2 = 'Less depth.'; }
     else if (c === 'hello') say2 = 'Hello. Ready when you are.';
-    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, a shape name, status, or time.';
+    else if (c === 'help') say2 = 'You can say stop, spin, bigger, smaller, faster, slower, reset, a shape name, status, or time. Or say Orbit, then any question.';
     else if (c === 'time') say2 = 'It is ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.';
     else if (c === 'date') say2 = 'Today is ' + new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
     else if (c === 'thanks') say2 = 'Any time.';
@@ -702,7 +740,97 @@
     else if (c === 'quiet') { say2 = 'Voice muted. Say speak to bring me back.'; speak(say2, true); muted = true; refreshAssist(); return; }
     else if (c === 'unquiet') { muted = false; say2 = 'Voice restored.'; }
     else { setShape(c); say2 = SHAPE_NAMES[c] + ' loaded.'; }
-    speak(say2, true); refreshAssist();
+    if (!silent) speak(say2, true);
+    refreshAssist();
+  }
+
+  /* ---------- AI brain: questions go to the Claude API using the key saved on this device ---------- */
+  var AI_URL = 'https://api.anthropic.com/v1/messages', AI_MODEL = 'claude-haiku-5-5', KEY_STORE = 'orbit_ai_key';
+  var ACTIONS = ['stop', 'spin', 'bigger', 'smaller', 'faster', 'slower', 'reset', 'globe', 'ring', 'cube', 'image', 'deeper', 'flatter'];
+  var aiKey = '', chat = [];
+  try { aiKey = localStorage.getItem(KEY_STORE) || ''; } catch (err) {}
+  function keyUI() {
+    el('keyOpen').dataset.set = aiKey ? 'yes' : 'no';
+    el('keyOpen').textContent = aiKey ? 'AI key set' : 'AI key';
+    el('keyState').textContent = aiKey ? 'A key is saved on this device, ending in ' + aiKey.slice(-4) + '.' : 'No key saved.';
+  }
+  function openKey() { el('keyModal').hidden = false; el('aiKey').value = ''; keyUI(); }
+  el('keyOpen').addEventListener('click', openKey);
+  el('keyClose').addEventListener('click', function () { el('keyModal').hidden = true; });
+  el('keySave').addEventListener('click', function () {
+    var k = el('aiKey').value.trim();
+    if (!k) { el('keyState').textContent = 'Paste the key into the box first.'; return; }
+    aiKey = k; var kept = true; try { localStorage.setItem(KEY_STORE, k); } catch (err) { kept = false; }
+    el('aiKey').value = ''; keyUI();
+    if (!kept) el('keyState').textContent = 'Key set for now, but this browser would not save it, so it will be forgotten on reload.';
+    log(NAME, 'AI key saved.');
+  });
+  el('keyRemove').addEventListener('click', function () {
+    aiKey = ''; chat = []; try { localStorage.removeItem(KEY_STORE); } catch (err) {} keyUI();
+  });
+  keyUI();
+
+  function systemPrompt() {
+    return 'You are Orbit, a voice assistant built into a web page that shows a 3D hologram the user spins with hand gestures. ' +
+      'Your reply is read aloud by a speech synthesiser, so answer in one to three short, plain sentences: no markdown, lists, emoji or symbols. ' +
+      'You can also control the hologram. Reply ONLY with a JSON object of this form: {"say": "what to say aloud", "actions": []}. ' +
+      '"actions" is a list of zero or more of: ' + ACTIONS.join(', ') + '. ' +
+      'stop and spin control rotation; bigger and smaller change size by about 30 percent each; faster and slower change spin speed; ' +
+      'globe, ring, cube and image switch the shape (image is a 3D model made from the user\'s photo); deeper and flatter change the image model depth; reset restores the start view. ' +
+      'Repeat an action to apply it more than once. Only use actions when the user asks for a change to the hologram. ' +
+      'Current state: shape ' + shape + ', size ' + Math.round(zoom * 100) + ' percent (range 40 to 260), ' + (spinning ? 'rotating' : 'not rotating') +
+      ', camera ' + (camOn ? 'on' : 'off') + ', hands in view ' + hands.length + '. Local time ' + new Date().toString() + '.';
+  }
+  function parseReply(text) {
+    var out = { say: '', actions: [] }, a = text.indexOf('{'), b = text.lastIndexOf('}');
+    if (a !== -1 && b > a) {
+      try {
+        var o = JSON.parse(text.slice(a, b + 1));
+        if (typeof o.say === 'string') out.say = o.say;
+        if (Array.isArray(o.actions)) out.actions = o.actions.filter(function (x) { return ACTIONS.indexOf(x) !== -1; }).slice(0, 8);
+      } catch (err) {}
+    }
+    if (!out.say && !out.actions.length) out.say = text.replace(/[{}*#`]/g, ' ').trim();
+    return out;
+  }
+  async function askAI(q) {
+    q = (q || '').trim(); if (!q || thinking) return;
+    lastUserAct = performance.now(); log('You', q);
+    if (!aiKey) { speak('I need an AI key before I can answer that.', true); openKey(); return; }
+    thinking = true; refreshAssist(); SFX.heard();
+    chat.push({ role: 'user', content: q });
+    while (chat.length > 12 || (chat.length && chat[0].role !== 'user')) chat.shift();
+    try {
+      var res = await fetch(AI_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: AI_MODEL, max_tokens: 400, system: systemPrompt(), messages: chat })
+      });
+      var data = null; try { data = await res.json(); } catch (err) {}
+      if (!res.ok) throw { status: res.status, msg: data && data.error && data.error.message };
+      var text = ((data && data.content) || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join(' ');
+      chat.push({ role: 'assistant', content: text });
+      var out = parseReply(text);
+      out.actions.forEach(function (x) { command(x, null, true); });
+      say(''); thinking = false;
+      speak(out.say || 'Done.', true);
+    } catch (e) {
+      chat.pop(); thinking = false; SFX.error();
+      speak(e && e.status === 401 ? 'That AI key was rejected. Check it and save it again.'
+          : e && e.status === 429 ? 'The AI service says the limit is reached. Try again shortly.'
+          : e && e.status ? 'The AI service returned an error.'
+          : 'I could not reach the AI service. Check the internet connection.', true);
+      if (e && e.status) say('The AI service answered: ' + (e.msg || 'error ' + e.status));
+    }
+    refreshAssist();
+  }
+  el('askForm').addEventListener('submit', function (e) {
+    e.preventDefault(); var t = el('askText'); askAI(t.value); t.value = ''; t.blur();
+  });
+  function fireAsk() {
+    clearTimeout(askTimer); var p = pendingAsk; pendingAsk = null; if (!p) return;
+    usedChars[p.i] = p.raw.length; seen[p.i] = p.words;
+    if (p.q) askAI(p.q); else speak('Yes? Say Orbit, then your question.', true);
   }
   function hearWord(w, prev) {
     var c = WORDS[w];
@@ -714,13 +842,23 @@
   function startListening() {
     if (!SR) return false;
     rec = new SR(); rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
-    rec.onstart = function () { seen = {}; listening = true; refreshAssist(); };
+    rec.onstart = function () { seen = {}; usedChars = {}; listening = true; refreshAssist(); };
     rec.onresult = function (e) {
       var deaf = talking || performance.now() < quietUntil;   // do not react to my own voice
       for (var i = e.resultIndex; i < e.results.length; i++) {
-        var words = e.results[i][0].transcript.toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean);
-        if (deaf) { seen[i] = words.length; continue; }
-        for (var j = seen[i] || 0; j < words.length; j++) if (hearWord(words[j], words[j - 1])) seen[i] = j + 1;
+        var raw = e.results[i][0].transcript;
+        var words = raw.toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean);
+        if (deaf || thinking) { seen[i] = words.length; usedChars[i] = raw.length; continue; }
+        // "Orbit, ..." sends the rest of the sentence to the AI instead of matching command words
+        var rest = raw.slice(usedChars[i] || 0), m = rest.search(/\borbits?\b/i);
+        var wake = -1; for (var w = seen[i] || 0; w < words.length; w++) if (words[w] === 'orbit' || words[w] === 'orbits') { wake = w; break; }
+        var end = wake === -1 ? words.length : wake;
+        for (var j = seen[i] || 0; j < end; j++) if (hearWord(words[j], words[j - 1])) seen[i] = j + 1;
+        if (wake !== -1 && m !== -1) {
+          pendingAsk = { i: i, raw: raw, words: words.length, q: rest.slice(m).replace(/^orbits?[\s,.!?]*/i, '').trim() };
+          clearTimeout(askTimer);
+          if (e.results[i].isFinal) fireAsk(); else askTimer = setTimeout(fireAsk, 1400); // wait for the sentence to finish
+        }
       }
     };
     rec.onerror = function (e) {
@@ -919,7 +1057,7 @@
   }
   requestAnimationFrame(frame);
 
-  window.__holo = { onResults: onResults, hear: hearWord, spinning: function () { return spinning; }, assistant: setAssistant, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, mode: handMode, hands: hands.length }; } };
+  window.__holo = { onResults: onResults, hear: hearWord, spinning: function () { return spinning; }, assistant: setAssistant, ask: askAI, log: function () { return logLines; }, state: function () { return { R: R, zoom: zoom, mode: handMode, hands: hands.length }; } };
 })();
 </script>
 </body>
